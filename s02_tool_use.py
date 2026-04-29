@@ -1,19 +1,28 @@
+#!/usr/bin/env python3
+# Harness: tool dispatch -- expanding what the model can reach.
+"""
+s02_tool_use.py - Tools
+
+The agent loop from s01 didn't change. We just added tools to the array
+and a dispatch map to route calls.
+
+    +----------+      +-------+      +------------------+
+    |   User   | ---> |  LLM  | ---> | Tool Dispatch    |
+    |  prompt  |      |       |      | {                |
+    +----------+      +---+---+      |   bash: run_bash |
+                          ^          |   read: run_read |
+                          |          |   write: run_wr  |
+                          +----------+   edit: run_edit |
+                          tool_result| }                |
+                                     +------------------+
+
+Key insight: "The loop didn't change at all. I just added tools."
+"""
+
+from cgitb import handler
 import os
 import subprocess
-
-from tools import Tools
-
-# 修复 macOS 终端里 Python 输入中文 / 特殊字符 / 退格键异常的问题
-try:
-    import readline
-    # #143 UTF-8 backspace fix for macOS libedit
-    readline.parse_and_bind('set bind-tty-special-chars off')
-    readline.parse_and_bind('set input-meta on')
-    readline.parse_and_bind('set output-meta on')
-    readline.parse_and_bind('set convert-meta off')
-    readline.parse_and_bind('set enable-meta-keybindings on')
-except ImportError:
-    pass
+from pathlib import Path
 
 from anthropic import Anthropic
 from dotenv import load_dotenv
@@ -23,60 +32,25 @@ load_dotenv(override=True)
 if os.getenv("ANTHROPIC_BASE_URL"):
     os.environ.pop("ANTHROPIC_AUTH_TOKEN", None)
 
+WORKDIR = Path.cwd()
 client = Anthropic(base_url=os.getenv("ANTHROPIC_BASE_URL"), api_key=os.getenv("ANTHROPIC_API_KEY"))
 MODEL = os.environ["MODEL_ID"]
 
-SYSTEM = f"You are a coding agent at {os.getcwd()}. Use bash to solve tasks. Act, don't explain."
+SYSTEM = f"You are a coding agent at {WORKDIR}. Use bash to solve tasks. Act, don't explain."
 
-TOOLS = [{
-    "name": "bash",
-    "description": "Run a shell command.",
-    "input_schema": {
-        "type": "object",
-        "properties": {  # 定义有哪些参数
-            "command": {"type": "string"}  # command 必须是字符串
-        },
-        "required": ["command"]
-    }
-}]
 
-# messages = [{"role": "user", "content": "Create a file called greet.py with a greet(name) function"}]
-# response = client.messages.create(
-#             model=MODEL, system=SYSTEM, messages=messages,
-#             tools=TOOLS, max_tokens=8000,
-#         )
-# print(response)
-# print(response.content)
+def safe_path(p: str) -> Path:
+    path = (WORKDIR / p).resolve()  # str -> Path
+    # .resolve()：把路径“还原成真实存在的位置”
+    # 例：
+    # WORKDIR = /app/workspace
+    # p = "../secret.txt"
 
-# Message(
-#     id='msg_29a45bc2-16b', 
-#     container=None, 
-#     content=[
-#         ToolUseBlock(
-#             id='tooluse_exqfLG4ABdtKuouib1phWp', 
-#             caller=None, 
-#             input={'command': 'cat > /Users/yangmw/Personal/Works/Agent/greet.py << \'EOF\'\ndef greet(name):\n    return f"Hello, {name}!"\nEOF'}, 
-#             name='bash', 
-#             type='tool_use'
-#         )
-#     ], 
-#     model='claude-sonnet-4-6', 
-#     role='assistant', 
-#     stop_reason='tool_use', 
-#     stop_sequence=None, 
-#     type='message', 
-#     usage=Usage(
-#         cache_creation=None, 
-#         cache_creation_input_tokens=140, 
-#         cache_read_input_tokens=28, 
-#         inference_geo=None, 
-#         input_tokens=2624, 
-#         output_tokens=53, 
-#         server_tool_use=None, 
-#         service_tier=None, 
-#         cache_write_tokens=140)
-# )
-
+    # (WORKDIR / p)         # /app/workspace/../secret.txt
+    # .resolve()            # /app/secret.txt   ← 真正位置
+    if not path.is_relative_to(WORKDIR):  # 检查这个路径是不是在 WORKDIR 里面
+        raise ValueError(f"Path escapes workspace: {p}")
+    return path
 
 
 def run_bash(command: str) -> str:
@@ -98,9 +72,124 @@ def run_bash(command: str) -> str:
          return "Error: Timeout (120s)"
 
 
+def run_read(path: str, limit: int = None) -> str:
+    try:
+        text = safe_path(path).read_text()  # 文件内容一次性读成一个字符串
+        lines = text.splitlines()  # 按换行符拆分字符串，返回一个按行分割的列表
+        if limit and limit < len(lines):
+            lines = lines[:limit] + [f"... ({len(lines) - limit} more lines)"]
+        return "\n".join(lines)[:50000]
+    except Exception as e:
+        return f"Error: {e}"
+
+
+def run_write(path: str, content: str) -> str:
+    try:
+        fp = safe_path(path)
+        fp.parent.mkdir(parents=True, exist_ok=True)
+        fp.write_text(content)
+        return f"Wrote {len(content)} bytes to {path}"
+    except Exception as e:
+        return f"Error: {e}"
+# 这几个tool返回都是str，是因为模型只接受str吗 不是 是简化
+# 精确结构（很重要） 比如： AST 表格数据 JSON API 响应 代码分析结果 ❗让模型做“程序级推理” 比如： 多步骤规划 状态机 structured tool chaining 这时候才应该： 👉 返回 JSON / dict，而不是纯字符串
+# 上述简化成输入llm的是有结构的json？可是这最终不也是转成str加入模型上下文？还是模型内部怎么处理这个json数组结构？
+# 是的，最终都会变成字符串（token序列）进入模型
+# 但“结构化 JSON”的意义不在于内部存储，而在于token组织方式 + schema约束 + 语义分隔
+def run_edit(path: str, old_text: str, new_text: str) -> str:
+    try:
+        fp = safe_path(path)
+        content = fp.read_text()
+        if old_text not in content:
+            return f"Error: Text not found in {path}"
+        fp.write_text(content.replace(old_text, new_text, 1))
+        return f"Edited {path}"
+    except Exception as e:
+        return f"Error: {e}"      
+
+# -- The dispatch map: {tool_name: handler} --
+
+# 把“带关键字参数的函数调用”包装成一个统一的处理入口
+# lambda **kw：接收任意数量的关键字参数，并把它们打包成一个字典 kw
+# kw["command"]：从参数字典里取出 "command"，只把它传给 run_bash
+
+# TOOL_HANDLERS = {
+#     "bash": lambda **kw: run_bash(kw["command"]),
+# }
+# 等价于：
+# def bash_handler(**kw):
+#     return run_bash(kw["command"])
+# 只是写成了匿名函数版本 + 字典映射
+
+# 典型的 工具分发器 / strategy pattern（策略模式）简化版
+# 它的作用：用字符串选择函数：TOOL_HANDLERS["bash"]
+# 所有工具统一调用方式：handler(**tool_args)
+
+# lambda **kw: run_bash(kw["command"])
+# “接收一堆参数 → 从里面挑 command → 调 run_bash”
+TOOL_HANDLERS = {
+    "bash":       lambda **kw: run_bash(kw["command"]),
+    "read_file":  lambda **kw: run_read(kw["path"], kw.get("limit")),
+    "write_file": lambda **kw: run_write(kw["path"], kw["content"]),
+    "edit_file":  lambda **kw: run_edit(kw["path"], kw["old_text"], kw["new_text"])
+}
+
+TOOLS = [
+    {
+        "name": "bash",
+        "description": "Run a shell command.",
+        "input_schema": {
+            "type": "object",
+            "properties": {  # 定义有哪些参数
+                "command": {"type": "string"}  # command 必须是字符串
+            },
+            "required": ["command"]
+        }
+    },
+    {
+        "name": "read_file",
+        "description": "Read file contents.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "path": {"type": "string"},
+                "limit":{"type": "integer"}
+            },
+            "required": ["path"]
+        }
+    },
+    {
+        "name": "write_file", 
+        "description": "Write content to file.",
+        "input_schema": {
+            "type": "object", 
+            "properties": {
+                "path": {"type": "string"}, 
+                "content": {"type": "string"}
+            }, 
+            "required": ["path", "content"]
+        }
+    },
+    {
+        "name": "edit_file", 
+        "description": "Replace exact text in file.",
+        "input_schema": {
+            "type": "object", 
+            "properties": {
+                "path": {"type": "string"}, 
+                "old_text": {"type": "string"}, 
+                "new_text": {"type": "string"}
+            }, 
+            "required": ["path", "old_text", "new_text"]
+        }
+    }
+]
+
+
 # -- The core pattern: a while loop that calls tools until the model stops --
 def agent_loop(messages: list):
     while True:
+        print("call llm:")
         response = client.messages.create(
             model=MODEL,
             system=SYSTEM,
@@ -118,14 +207,19 @@ def agent_loop(messages: list):
         results = []
         for block in response.content:
             if block.type == "tool_use":
-                print(f"\033[33m$ {block.input['command']}\033[0m")
-                output = run_bash(block.input["command"])
-                print(output[:200])
-                results.append({
-                    "type": "tool_result",
-                    "tool_use_id": block.id,
-                    "content": output
-                })
+                # print(f"\033[33m$ {block.input['command']}\033[0m")
+                # output = run_bash(block.input["command"])
+                # print(output[:200])
+                # results.append({
+                #     "type": "tool_result",
+                #     "tool_use_id": block.id,
+                #     "content": output
+                # })
+                handler = TOOL_HANDLERS.get(block.name)
+                output = handler(**block.input) if handler else f"Unknown tool: {block.name}"  # **的作用是把字典“解包成关键字参数”
+                # print(f"> {block.name}:")
+                # print(output[:200])
+                results.append({"type": "tool_result", "tool_use_id": block.id, "content": output})
         messages.append({"role": "user", "content": results})
 
 
@@ -147,49 +241,32 @@ if __name__ == "__main__":
             print(f"\n--- message {i} ---")
             print(m)
 
-        response_content = history[-1]["content"]
-        if isinstance(response_content, list):
-            for block in response_content:
-                if hasattr(block, "text"):
-                    print(block.text)
+        # response_content = history[-1]["content"]
+        # if isinstance(response_content, list):
+        #     for block in response_content:
+        #         if hasattr(block, "text"):
+        #             print(block.text)
         print()
 
 
-# s01 >> Create a file called greet.py with a greet(name) function
-# Message(id='msg_01HrdkxK2JQpVQgXVhJuPdNP', container=None, content=[ToolUseBlock(id='toolu_01PAiYrbm874JjH7VKJAskh4', caller=DirectCaller(type='direct'), input={'command': 'cat << \'EOF\' > /Users/yangmw/Personal/Works/Agent/greet.py\ndef greet(name):\n    """Greet a person by name."""\n    return f"Hello, {name}!"\nEOF'}, name='bash', type='tool_use')], model='claude-sonnet-4-6', role='assistant', stop_reason='tool_use', stop_sequence=None, type='message', usage=Usage(cache_creation=CacheCreation(ephemeral_1h_input_tokens=0, ephemeral_5m_input_tokens=0), cache_creation_input_tokens=0, cache_read_input_tokens=0, inference_geo='not_available', input_tokens=602, output_tokens=106, server_tool_use=None, service_tier='standard'), stop_details=None)
-# $ cat << 'EOF' > /Users/yangmw/Personal/Works/Agent/greet.py
-# def greet(name):
-#     """Greet a person by name."""
-#     return f"Hello, {name}!"
-# EOF
-# (no output)
-# Message(id='msg_017MtqABC4HgZoKMFqSuyoLa', container=None, content=[TextBlock(citations=None, text='The file `greet.py` has been created at `/Users/yangmw/Personal/Works/Agent/greet.py` with the following content:\n\n```python\ndef greet(name):\n    """Greet a person by name."""\n    return f"Hello, {name}!"\n```\n\nThe `greet(name)` function:\n- Takes a single argument `name`\n- Returns a greeting string in the format `"Hello, {name}!"`\n- Includes a docstring describing its purpose', type='text')], model='claude-sonnet-4-6', role='assistant', stop_reason='end_turn', stop_sequence=None, type='message', usage=Usage(cache_creation=CacheCreation(ephemeral_1h_input_tokens=0, ephemeral_5m_input_tokens=0), cache_creation_input_tokens=0, cache_read_input_tokens=0, inference_geo='not_available', input_tokens=722, output_tokens=120, server_tool_use=None, service_tier='standard'), stop_details=None)
+# s01 >> Edit greet.py to add a docstring to the function
+# call llm:
+# Message(id='msg_20260429185718be717515644445c0', container=None, content=[ToolUseBlock(id='call_db61a7213ed241b2b05fe2a4', caller=None, input={'path': '/Users/yangmw/Personal/Works/Agent/greet.py'}, name='read_file', type='tool_use')], model='glm-5.1', role='assistant', stop_reason='tool_use', stop_sequence=None, type='message', usage=Usage(cache_creation=None, cache_creation_input_tokens=None, cache_read_input_tokens=0, inference_geo=None, input_tokens=371, output_tokens=23, server_tool_use=ServerToolUsage(web_fetch_requests=None, web_search_requests=0), service_tier='standard'))
+# call llm:
+# Message(id='msg_20260429185723f29e3f747f3e4477', container=None, content=[TextBlock(citations=None, text='The function already has a docstring: `"""Greet a person by name."""`. No changes are needed — the docstring is already present.', type='text')], model='glm-5.1', role='assistant', stop_reason='end_turn', stop_sequence=None, type='message', usage=Usage(cache_creation=None, cache_creation_input_tokens=None, cache_read_input_tokens=320, inference_geo=None, input_tokens=101, output_tokens=31, server_tool_use=ServerToolUsage(web_fetch_requests=None, web_search_requests=0), service_tier='standard'))
 
 # ===== FULL MESSAGES DEBUG =====
 
 # --- message 0 ---
-# {'role': 'user', 'content': 'Create a file called greet.py with a greet(name) function'}
+# {'role': 'user', 'content': 'Edit greet.py to add a docstring to the function'}
 
 # --- message 1 ---
-# {'role': 'assistant', 'content': [ToolUseBlock(id='toolu_01PAiYrbm874JjH7VKJAskh4', caller=DirectCaller(type='direct'), input={'command': 'cat << \'EOF\' > /Users/yangmw/Personal/Works/Agent/greet.py\ndef greet(name):\n    """Greet a person by name."""\n    return f"Hello, {name}!"\nEOF'}, name='bash', type='tool_use')]}
+# {'role': 'assistant', 'content': [ToolUseBlock(id='call_db61a7213ed241b2b05fe2a4', caller=None, input={'path': '/Users/yangmw/Personal/Works/Agent/greet.py'}, name='read_file', type='tool_use')]}
 
 # --- message 2 ---
-# {'role': 'user', 'content': [{'type': 'tool_result', 'tool_use_id': 'toolu_01PAiYrbm874JjH7VKJAskh4', 'content': '(no output)'}]}
+# {'role': 'user', 'content': [{'type': 'tool_result', 'tool_use_id': 'call_db61a7213ed241b2b05fe2a4', 'content': 'def greet(name):\n    """Greet a person by name."""\n    return f"Hello, {name}!"'}]}
 
 # --- message 3 ---
-# {'role': 'assistant', 'content': [TextBlock(citations=None, text='The file `greet.py` has been created at `/Users/yangmw/Personal/Works/Agent/greet.py` with the following content:\n\n```python\ndef greet(name):\n    """Greet a person by name."""\n    return f"Hello, {name}!"\n```\n\nThe `greet(name)` function:\n- Takes a single argument `name`\n- Returns a greeting string in the format `"Hello, {name}!"`\n- Includes a docstring describing its purpose', type='text')]}
-# The file `greet.py` has been created at `/Users/yangmw/Personal/Works/Agent/greet.py` with the following content:
+# {'role': 'assistant', 'content': [TextBlock(citations=None, text='The function already has a docstring: `"""Greet a person by name."""`. No changes are needed — the docstring is already present.', type='text')]}
 
-# ```python
-# def greet(name):
-#     """Greet a person by name."""
-#     return f"Hello, {name}!"
-# ```
-
-# The `greet(name)` function:
-# - Takes a single argument `name`
-# - Returns a greeting string in the format `"Hello, {name}!"`
-# - Includes a docstring describing its purpose
-
-# s01 >> q
-# (general) yangmw@bogon Agent % 
+# s01 >> 

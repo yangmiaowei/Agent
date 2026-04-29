@@ -1,7 +1,31 @@
+#!/usr/bin/env python3
+# Harness: the loop -- the model's first connection to the real world.
+"""
+s01_agent_loop.py - The Agent Loop
+
+The entire secret of an AI coding agent in one pattern:
+
+    while stop_reason == "tool_use":
+        response = LLM(messages, tools)
+        execute tools
+        append results
+
+    +----------+      +-------+      +---------+
+    |   User   | ---> |  LLM  | ---> |  Tool   |
+    |  prompt  |      |       |      | execute |
+    +----------+      +---+---+      +----+----+
+                          ^               |
+                          |   tool_result |
+                          +---------------+
+                          (loop continues)
+
+This is the core loop: feed tool results back to the model
+until the model decides to stop. Production agents layer
+policy, hooks, and lifecycle controls on top.
+"""
+
 import os
 import subprocess
-
-from tools import Tools
 
 # 修复 macOS 终端里 Python 输入中文 / 特殊字符 / 退格键异常的问题
 try:
@@ -154,3 +178,44 @@ if __name__ == "__main__":
                 if hasattr(block, "text"):
                     print(block.text)
         print()
+
+
+
+# s01 >> Create a file called greet.py with a greet(name) function
+# Message(id='msg_01HrdkxK2JQpVQgXVhJuPdNP', container=None, content=[ToolUseBlock(id='toolu_01PAiYrbm874JjH7VKJAskh4', caller=DirectCaller(type='direct'), input={'command': 'cat << \'EOF\' > /Users/yangmw/Personal/Works/Agent/greet.py\ndef greet(name):\n    """Greet a person by name."""\n    return f"Hello, {name}!"\nEOF'}, name='bash', type='tool_use')], model='claude-sonnet-4-6', role='assistant', stop_reason='tool_use', stop_sequence=None, type='message', usage=Usage(cache_creation=CacheCreation(ephemeral_1h_input_tokens=0, ephemeral_5m_input_tokens=0), cache_creation_input_tokens=0, cache_read_input_tokens=0, inference_geo='not_available', input_tokens=602, output_tokens=106, server_tool_use=None, service_tier='standard'), stop_details=None)
+# $ cat << 'EOF' > /Users/yangmw/Personal/Works/Agent/greet.py
+# def greet(name):
+#     """Greet a person by name."""
+#     return f"Hello, {name}!"
+# EOF
+# (no output)
+# Message(id='msg_017MtqABC4HgZoKMFqSuyoLa', container=None, content=[TextBlock(citations=None, text='The file `greet.py` has been created at `/Users/yangmw/Personal/Works/Agent/greet.py` with the following content:\n\n```python\ndef greet(name):\n    """Greet a person by name."""\n    return f"Hello, {name}!"\n```\n\nThe `greet(name)` function:\n- Takes a single argument `name`\n- Returns a greeting string in the format `"Hello, {name}!"`\n- Includes a docstring describing its purpose', type='text')], model='claude-sonnet-4-6', role='assistant', stop_reason='end_turn', stop_sequence=None, type='message', usage=Usage(cache_creation=CacheCreation(ephemeral_1h_input_tokens=0, ephemeral_5m_input_tokens=0), cache_creation_input_tokens=0, cache_read_input_tokens=0, inference_geo='not_available', input_tokens=722, output_tokens=120, server_tool_use=None, service_tier='standard'), stop_details=None)
+
+# ===== FULL MESSAGES DEBUG =====
+
+# --- message 0 ---
+# {'role': 'user', 'content': 'Create a file called greet.py with a greet(name) function'}
+
+# --- message 1 ---
+# {'role': 'assistant', 'content': [ToolUseBlock(id='toolu_01PAiYrbm874JjH7VKJAskh4', caller=DirectCaller(type='direct'), input={'command': 'cat << \'EOF\' > /Users/yangmw/Personal/Works/Agent/greet.py\ndef greet(name):\n    """Greet a person by name."""\n    return f"Hello, {name}!"\nEOF'}, name='bash', type='tool_use')]}
+
+# --- message 2 ---
+# {'role': 'user', 'content': [{'type': 'tool_result', 'tool_use_id': 'toolu_01PAiYrbm874JjH7VKJAskh4', 'content': '(no output)'}]}
+
+# --- message 3 ---
+# {'role': 'assistant', 'content': [TextBlock(citations=None, text='The file `greet.py` has been created at `/Users/yangmw/Personal/Works/Agent/greet.py` with the following content:\n\n```python\ndef greet(name):\n    """Greet a person by name."""\n    return f"Hello, {name}!"\n```\n\nThe `greet(name)` function:\n- Takes a single argument `name`\n- Returns a greeting string in the format `"Hello, {name}!"`\n- Includes a docstring describing its purpose', type='text')]}
+# The file `greet.py` has been created at `/Users/yangmw/Personal/Works/Agent/greet.py` with the following content:
+
+# ```python
+# def greet(name):
+#     """Greet a person by name."""
+#     return f"Hello, {name}!"
+# ```
+
+# The `greet(name)` function:
+# - Takes a single argument `name`
+# - Returns a greeting string in the format `"Hello, {name}!"`
+# - Includes a docstring describing its purpose
+
+# s01 >> q
+# (general) yangmw@bogon Agent % 
