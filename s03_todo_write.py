@@ -1,22 +1,31 @@
 #!/usr/bin/env python3
-# Harness: tool dispatch -- expanding what the model can reach.
+# Harness: planning -- keeping the model on course without scripting the route.
+# 让模型保持在正确的轨道上，而不是事先把路线脚本化。
 """
-s02_tool_use.py - Tools
+s03_todo_write.py - TodoWrite
 
-The agent loop from s01 didn't change. We just added tools to the array
-and a dispatch map to route calls.
+The model tracks its own progress via a TodoManager. A nag reminder
+forces it to keep updating when it forgets.
 
-    +----------+      +-------+      +------------------+
-    |   User   | ---> |  LLM  | ---> | Tool Dispatch    |
-    |  prompt  |      |       |      | {                |
-    +----------+      +---+---+      |   bash: run_bash |
-                          ^          |   read: run_read |
-                          |          |   write: run_wr  |
-                          +----------+   edit: run_edit |
-                          tool_result| }                |
-                                     +------------------+
+    +----------+      +-------+      +---------+
+    |   User   | ---> |  LLM  | ---> | Tools   |
+    |  prompt  |      |       |      | + todo  |
+    +----------+      +---+---+      +----+----+
+                          ^               |
+                          |   tool_result |
+                          +---------------+
+                                |
+                    +-----------+-----------+
+                    | TodoManager state     |
+                    | [ ] task A            |
+                    | [>] task B <- doing   |
+                    | [x] task C            |
+                    +-----------------------+
+                                |
+                    if rounds_since_todo >= 3:
+                      inject <reminder>
 
-Key insight: "The loop didn't change at all. I just added tools."
+Key insight: "The agent can track its own progress -- and I can see it."
 """
 
 import os
@@ -35,9 +44,35 @@ WORKDIR = Path.cwd()
 client = Anthropic(base_url=os.getenv("ANTHROPIC_BASE_URL"), api_key=os.getenv("ANTHROPIC_API_KEY"))
 MODEL = os.environ["MODEL_ID"]
 
-SYSTEM = f"You are a coding agent at {WORKDIR}. Use tools to solve tasks. Act, don't explain."
+SYSTEM = f"""You are a coding agent at {WORKDIR}.
+Use the todo tool to plan multi-step tasks. Mark in_progress before starting, completed when done.
+Prefer tools over prose."""
 
 
+# -- TodoManager: structured state the LLM writes to --
+# 由大模型写入的结构化状态
+class TodoManager:
+    def __init__(self):
+        self.items = []
+
+    def update(self, items: list) -> str:
+        pass
+
+    def render(self) -> str:
+        pass
+
+
+
+
+
+
+
+
+
+
+
+
+# -- Tool implementations --
 def safe_path(p: str) -> Path:
     path = (WORKDIR / p).resolve()  # str -> Path
     # .resolve()：把路径“还原成真实存在的位置”
@@ -246,26 +281,3 @@ if __name__ == "__main__":
         #         if hasattr(block, "text"):
         #             print(block.text)
         print()
-
-
-# s01 >> Edit greet.py to add a docstring to the function
-# call llm:
-# Message(id='msg_20260429185718be717515644445c0', container=None, content=[ToolUseBlock(id='call_db61a7213ed241b2b05fe2a4', caller=None, input={'path': '/Users/yangmw/Personal/Works/Agent/greet.py'}, name='read_file', type='tool_use')], model='glm-5.1', role='assistant', stop_reason='tool_use', stop_sequence=None, type='message', usage=Usage(cache_creation=None, cache_creation_input_tokens=None, cache_read_input_tokens=0, inference_geo=None, input_tokens=371, output_tokens=23, server_tool_use=ServerToolUsage(web_fetch_requests=None, web_search_requests=0), service_tier='standard'))
-# call llm:
-# Message(id='msg_20260429185723f29e3f747f3e4477', container=None, content=[TextBlock(citations=None, text='The function already has a docstring: `"""Greet a person by name."""`. No changes are needed — the docstring is already present.', type='text')], model='glm-5.1', role='assistant', stop_reason='end_turn', stop_sequence=None, type='message', usage=Usage(cache_creation=None, cache_creation_input_tokens=None, cache_read_input_tokens=320, inference_geo=None, input_tokens=101, output_tokens=31, server_tool_use=ServerToolUsage(web_fetch_requests=None, web_search_requests=0), service_tier='standard'))
-
-# ===== FULL MESSAGES DEBUG =====
-
-# --- message 0 ---
-# {'role': 'user', 'content': 'Edit greet.py to add a docstring to the function'}
-
-# --- message 1 ---
-# {'role': 'assistant', 'content': [ToolUseBlock(id='call_db61a7213ed241b2b05fe2a4', caller=None, input={'path': '/Users/yangmw/Personal/Works/Agent/greet.py'}, name='read_file', type='tool_use')]}
-
-# --- message 2 ---
-# {'role': 'user', 'content': [{'type': 'tool_result', 'tool_use_id': 'call_db61a7213ed241b2b05fe2a4', 'content': 'def greet(name):\n    """Greet a person by name."""\n    return f"Hello, {name}!"'}]}
-
-# --- message 3 ---
-# {'role': 'assistant', 'content': [TextBlock(citations=None, text='The function already has a docstring: `"""Greet a person by name."""`. No changes are needed — the docstring is already present.', type='text')]}
-
-# s01 >> 
