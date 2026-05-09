@@ -1,6 +1,20 @@
 #!/usr/bin/env python3
 # Harness: compression -- clean memory for infinite sessions.  
 # 压缩 -- 干净的记忆, 无限的会话。
+
+# 核心不都是agent loop吗，langgraph的显式图和这个手工的agent原理上区别在哪？
+
+# 这个：
+# - LLM 决定控制流
+# - 控制流隐含在 prompt + messages + 模型推理里
+# - loop 本身几乎没有业务逻辑
+# - runtime 更像工具执行器
+
+# LangGraph：
+# - 图已经写死（显式状态机，状态转移规则是代码定义的）
+# - 图/状态机决定主流程，流向由 runtime + state 控制
+# - LLM 只是某个节点里的推理组件
+# - runtime 本身包含业务逻辑
 """
 s06_context_compact.py - Compact
 
@@ -68,7 +82,12 @@ def estimate_tokens(messages: list) -> int:
 
 # -- Layer 1: micro_compact - replace old tool results with placeholders --
 def micro_compact(messages: list) -> list:
-    pass
+    # Collect (msg_index, part_index, tool_result_dict) for all tool_result entries
+    tool_results = []
+    for msg_idx, msg in enumerate(messages):
+        if msg["role"] == "user" and isinstance(msg.get("content"), list):
+            
+
 
 # -- Layer 2: auto_compact - save transcript, summarize, replace messages --
 def auto_compact(messages: list) -> list:
@@ -152,6 +171,12 @@ TOOLS = [
 
 def agent_loop(messages: list):
     while True:
+        # Layer 1: micro_compact before each LLM call
+        micro_compact(messages)
+        # Layer 2: auto_compact if token estimate exceeds threshold
+        if estimate_tokens(messages) > THRESHOLD:
+            print("[auto_compact triggered]")
+            messages[:] = auto_compact(messages)  # 把 messages 这个列表里的内容，原地替换成新的内
         response = client.messages.create(
             model=MODEL,
             system=SYSTEM,
@@ -165,15 +190,24 @@ def agent_loop(messages: list):
         results = []
         for block in response.content:
             if block.type == "tool_use":
-                handler = TOOL_HANDLERS.get(block.name)
-                try:
-                    output = handler(**block.input) if handler else f"Unknown tool: {block.name}"
-                except Exception as e:
-                    output = f"Error: {e}"
+                if block.name == "compact":
+                    manual_compact = True
+                    output = "Compressing..."
+                else:
+                    handler = TOOL_HANDLERS.get(block.name)
+                    try:
+                        output = handler(**block.input) if handler else f"Unknown tool: {block.name}"
+                    except Exception as e:
+                        output = f"Error: {e}"
                 print(f"> {block.name}:")
                 print(str(output[:200]))
                 results.append({"type": "tool_result", "tool_use_id": block.id, "content": output})
         messages.append({"role": "user", "content": results})
+        # Layer 3: manual compact triggered by the compact tool
+        if manual_compact:
+            print("[manual compact]")
+            messages[:] = auto_compact(messages)
+            return
 
 
 if __name__ == "__main__":
