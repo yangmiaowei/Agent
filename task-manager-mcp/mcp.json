@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "task-manager": {
+      "command": "/Users/yangmw/Personal/Works/Agent/task-manager-mcp/venv/bin/python3",
+      "args": ["/Users/yangmw/Personal/Works/Agent/task-manager-mcp/server.py"]
+    }
+  }
+}

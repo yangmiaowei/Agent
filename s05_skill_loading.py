@@ -43,7 +43,9 @@ Key insight: "Don't put everything in the system prompt. Load on demand."
 
 import os
 import re
+import string
 import subprocess
+import yaml
 from pathlib import Path
 
 from anthropic import Anthropic
@@ -63,16 +65,64 @@ SKILL_DIR = WORKDIR / "skills"
 # -- SkillLoader: scan skills/<name>/SKILL.md with YAML frontmatter --
 class SkillLoader:
     def __init__(self, skill_dir: Path):
+        self.skill_dir = skill_dir
+        self.skills = {}
+        self._load_all()
+    
+    def _load_all(self):
+        if not self.skill_dir.exists():
+            return
+        for f in sorted(self.skill_dir.rglob("SKILL.md")):  # recursive glob 从skill_dir目录开始递归进入子目录查找文件，类似glob
+            text = f.read_text()
+            meta, body = self._parse_frontmatter(text)
+            name = meta.get("name", f.parent.name)  # name
+            # 扫描所有 SKILL.md 文件 → 读取内容 → 解析元数据 → 注册成一个 skill 字典。
+            self.skills[name] = {"meta": meta, "body": body, "path": str(f)}
+
+    def _parse_frontmatter(self, text: str) -> tuple:
+        """Parse YAML frontmatter between -- delimiters."""
+        match = re.match(r"^---\n(.*?)\n---\n(.*)", text, re.DOTALL)
+        if not match:
+            return {}, text
+        try:
+            meta = yaml.safe_load(match.group(1)) or {}  # load
+        except yaml.YAMLError:
+            meta = {}
+        return meta, match.group(2).strip()
+
+    def get_descriptions(self) -> str:
+        """Layer 1: short descriptions for the system prompt."""
+        if not self.skills:
+            return "(no skills available)"
+        lines = []
+        for name, skill in self.skills.items():
+            desc = skill["meta"].get("description", "No description")
+            tags = skill["meta"].get("tags", "")
+            line = f" - {name}: {desc}"
+            if tags:
+                line += f" [{tags}]"
+            lines.append(line)
+        return "\n".join(lines)
+
+    def get_content(self, name: str) -> str:  # 结构化prompt
+        """Layer 2: full skill body returned in tool_result."""
+        skill = self.skills.get(name)
+        if not skill:
+            return f"Error: Unknown skill '{name}'. Available: {','.join(self.skills.keys())}"
+        return f"<skill name=\"{name}\">\n{skill['body']}\n</skill>"
 
 
+SKILL_LOADER = SkillLoader(SKILL_DIR)
 
-
-
+# Layer 1: skill metadata injected into system prompt
 SYSTEM = f"""You are a coding agent at {WORKDIR}. 
-Use the task tool to delegate exploration or subtasks."""
+Use load_skill to access specialized knowledge before tackling unfamiliar topics.
+
+Skills available:
+{SKILL_LOADER.get_descriptions()}"""
 
 
-# -- Tool implementations shared by parent and child --
+# -- Tool implementations --
 def safe_path(p: str) -> Path:
     path = (WORKDIR / p).resolve()
     if not path.is_relative_to(WORKDIR):
@@ -126,10 +176,10 @@ TOOL_HANDLERS = {
     "read_file":  lambda **kw: run_read(kw["path"], kw.get("limit")),
     "write_file": lambda **kw: run_write(kw["path"], kw["content"]),
     "edit_file":  lambda **kw: run_edit(kw["path"], kw["old_text"], kw["new_text"]),
+    "load_skill": lambda **kw: SKILL_LOADER.get_content(kw["name"]),
 }
 
-# Child gets all base tools except task (no recursive spawning)
-CHILD_TOOLS = [
+TOOLS = [
     {"name": "bash", "description": "Run a shell command.",
      "input_schema": {"type": "object", "properties": {"command": {"type": "string"}}, "required": ["command"]}},
     {"name": "read_file", "description": "Read file contents.",
@@ -138,74 +188,18 @@ CHILD_TOOLS = [
      "input_schema": {"type": "object", "properties": {"path": {"type": "string"}, "content": {"type": "string"}}, "required": ["path", "content"]}},
     {"name": "edit_file", "description": "Replace exact text in file.",
      "input_schema": {"type": "object", "properties": {"path": {"type": "string"}, "old_text": {"type": "string"}, "new_text": {"type": "string"}}, "required": ["path", "old_text", "new_text"]}},
+    {"name": "load_skill", "description": "Load specialized knowledge by name.",
+    "input_schema": {"type": "object", "properties": {"name": {"type": "string", "description": "Skill name to load"}}, "required": ["name"]}},
 ]
-
-
-# -- Subagent: fresh context, filtered tools, summary-only return --
-def run_subagent(prompt: str) -> str:
-    sub_messages = [{"role": "user", "content": prompt}]  # fresh context
-    for _ in range(30):  # safety limit
-        response = client.messages.create(
-            model=MODEL,
-            system=SUBAGENT_SYSTEM,
-            messages=sub_messages,
-            tools=CHILD_TOOLS,
-            max_tokens=8000
-        )
-        sub_messages.append({"role": "assistant", "content": response.content})
-        if response.stop_reason != "tool_use":
-            break
-        results = []
-        for block in response.content:
-            if block.type == "tool_use":
-                handler = TOOL_HANDLERS.get(block.name)
-                output = handler(**block.input) if handler else f"Unknown tool: {block.name}"
-                results.append({"type": "tool_result", "tool_use_id": block.id, "content": str(output)[:50000]})
-        sub_messages.append({"role": "user", "content": results})
-
-    print("\n===== SUBAGENT DEBUG =====")
-    for i, m in enumerate(sub_messages):
-        print(f"\n--- sub message {i} ---")
-        print(m)
-
-    # Only the final text returns to the parent -- child context is discarded
-    return "".join(b.text for b in response.content if hasattr(b, "text")) or "(no summary)"
-
-
-# -- Parent tools: base tools + task dispatcher --
-PARENT_TOOLS = CHILD_TOOLS + [
-    {"name": "task", "description": "Spawn a subagent with fresh context. It shares the filesystem but not conversation history.",
-     "input_schema": {"type": "object", "properties": {"prompt": {"type": "string"}, "description": {"type": "string", "description": "Short description of the task"}}, "required": ["prompt"]}},
-]
-# 这里的 "task" 只是“工具定义（schema）”，只是告诉模型：
-# “你可以调用一个叫 task 的工具，它接受哪些参数、作用是什么”
-# 类似于 API 文档。真正的“函数实现”而是通过：if block.name == "task":手动 dispatch 到：run_subagent(...)
-# 整体结构是：
-# LLM 生成 tool_use(name="task")
-#         ↓
-# agent_loop 检测到 task
-#         ↓
-# run_subagent(prompt)
-#         ↓
-# 启动新的 messages=[]
-# 你可以把它理解成一种：
-# tool_name -> handler
-# 的动态路由。
-# 前面的普通工具：
-# TOOL_HANDLERS = {
-#     "bash": lambda **kw: run_bash(...),
-# }
-# 是“字典路由”。
 
 
 def agent_loop(messages: list):
     while True:
-        # Nag reminder is injected below, alongside tool results
         response = client.messages.create(
             model=MODEL,
             system=SYSTEM,
             messages=messages,
-            tools=PARENT_TOOLS,
+            tools=TOOLS,
             max_tokens=8000
         )
         messages.append({"role": "assistant", "content": response.content})
@@ -214,14 +208,13 @@ def agent_loop(messages: list):
         results = []
         for block in response.content:
             if block.type == "tool_use":
-                if block.name == "task":
-                    desc = block.input.get("description", "subtask")  # 和上述PARENT_TOOLS对应
-                    print(f"> task ({desc}): {block.input['prompt'][:80]}")
-                    output = run_subagent(block.input["prompt"])
-                else:
-                    handler = TOOL_HANDLERS.get(block.name)
+                handler = TOOL_HANDLERS.get(block.name)
+                try:
                     output = handler(**block.input) if handler else f"Unknown tool: {block.name}"
-                print(output[:200])
+                except Exception as e:
+                    output = f"Error: {e}"
+                print(f"> {block.name}:")
+                print(str(output[:200]))
                 results.append({"type": "tool_result", "tool_use_id": block.id, "content": output})
         messages.append({"role": "user", "content": results})
 
