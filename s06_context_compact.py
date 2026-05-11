@@ -69,7 +69,7 @@ MODEL = os.environ["MODEL_ID"]
 
 SYSTEM = f"""You are a coding agent at {WORKDIR}. Use tools to solve tasks."""
 
-THRESHOLD = 50000
+THRESHOLD = 5000  # 改小点好触发
 TRANSCRIPT_DIR = WORKDIR / ".transcripts"
 KEEP_RECENT = 3
 PRESERVE_RESULT_TOOLS = {"read_file"}  # source of truth
@@ -86,15 +86,58 @@ def micro_compact(messages: list) -> list:
     tool_results = []
     for msg_idx, msg in enumerate(messages):
         if msg["role"] == "user" and isinstance(msg.get("content"), list):
-            
+            for part_idx, part in enumerate(msg["content"]):
+                if isinstance(part, dict) and  part.get("type") == "tool_result":
+                    tool_results.append((msg_idx, part_idx, part))
+    if len(tool_results) <= KEEP_RECENT:
+        return messages
+    # Find tool_name for each result by matching tool_use_id in prior assistant messages
+    tool_name_map = {}
+    for msg in messages:
+        if msg["role"] == "assistant":
+            content = msg.get("content", [])
+            if isinstance(content, list):
+                for block in content:
+                    if hasattr(block, "type") and block.type == "tool_use":
+                        tool_name_map[block.id] = block.name
+    # Clear old results (keep last KEEP_RECENT). Preserve read_file outputs because
+    # they are reference material; compacting them forces the agent to re-read files.
+    to_clear = tool_results[:-KEEP_RECENT]
+    for _, _, result in to_clear:
+        if not isinstance(result.get("content"), str) or len(result["content"]) <= 100:
+            continue
+        tool_id = result.get("tool_use_id", "")
+        tool_name = tool_name_map.get(tool_id, "unknown")
+        if tool_name in PRESERVE_RESULT_TOOLS:
+            continue
+        result["content"] = f"[Previous: used {tool_name}]"
+    return messages
 
 
 # -- Layer 2: auto_compact - save transcript, summarize, replace messages --
 def auto_compact(messages: list) -> list:
-    pass
-
-
-
+    # Save full transcript to disk
+    TRANSCRIPT_DIR.mkdir(exist_ok=True)
+    transcript_path = TRANSCRIPT_DIR / f"transcript_{int(time.time())}.jsonl"
+    with open(transcript_path, "w") as f:
+        for msg in messages:
+            f.write(json.dumps(msg, default=str) + "\n")
+    print(f"[transcript saved: {transcript_path}]")
+    # Ask LLM to summarize
+    conversation_text = json.dumps(messages, default=str)[-80000:]
+    response = client.messages.create(
+        model=MODEL,
+        messages=[{"role": "user", "content":
+            "Summarize this conversation for continuity. Include: "
+            "1) What was accomplished, 2) Current state, 3) Key decisions made. "
+            "Be concise but preserve critical details.\n\n" + conversation_text}],
+        max_tokens=2000,
+    )
+    summary = response.content[0].text
+    # Replace all messages with compressed summary
+    return [
+        {"role": "user", "content": f"[Conversation compressed. Transcript: {transcript_path}]\n\n{summary}"},
+    ]
 
 
 # -- Tool implementations --
@@ -188,6 +231,7 @@ def agent_loop(messages: list):
         if response.stop_reason != "tool_use":
             return
         results = []
+        manual_compact = False
         for block in response.content:
             if block.type == "tool_use":
                 if block.name == "compact":
@@ -236,80 +280,147 @@ if __name__ == "__main__":
         print()
 
 
-# (general) yangmw@YangdeMacBook-Air Agent % /opt/anaconda3/envs/general/bin/python /Users/yangmw/Personal/Works/Agent/s04_subagent.py
-# s01 >> Use a task to create a new module, then verify it from here
-# > task (Create a new module): Create a new Python module at /Users/yangmw/Personal/Works/Agent/mymodule/. The 
+# s01 >> Read every Python file in the agents/ directory one by one
+# > bash:
+# find: /Users/yangmw/Personal/Works/Agent/agents/: No such file or directory
+# > bash:
+# __pycache__
+# Agent.py
+# greet.py
+# LLM.py
+# main.py
+# mymodule
+# prompt.py
+# s01_agent_loop.py
+# s02_tool_use.py
+# s03_todo_write.py
+# s04_subagent.py
+# s05_skill_loading.py
+# s06_context_compact.py
+# skills
+# task-manager-mcp
 
-# ===== SUBAGENT DEBUG =====
+# > bash:
+# /Users/yangmw/Personal/Works/Agent/Agent.py
+# /Users/yangmw/Personal/Works/Agent/greet.py
+# /Users/yangmw/Personal/Works/Agent/LLM.py
+# /Users/yangmw/Personal/Works/Agent/main.py
+# /Users/yangmw/Personal/Work
+# [auto_compact triggered]
+# [transcript saved: /Users/yangmw/Personal/Works/Agent/.transcripts/transcript_1778493223.jsonl]
+# > read_file:
+# import json5
 
-# --- sub message 0 ---
-# {'role': 'user', 'content': 'Create a new Python module at /Users/yangmw/Personal/Works/Agent/mymodule/. The module should include:\n\n1. An `__init__.py` that exports the main function.\n2. A `core.py` file with a function called `greet(name: str) -> str` that returns a greeting string like "Hello, {name}!".\n3. A `utils.py` file with a helper function `format_message(message: str) -> str` that uppercases and strips the message.\n\nMake sure the `__init__.py` properly imports and exposes `greet` from `core.py`.'}
+# from LLM import OllamaChat
+# from tools import Tools
 
-# --- sub message 1 ---
-# {'role': 'assistant', 'content': [ToolUseBlock(id='call_9e1cab133187483cb7834a75', caller=None, input={'command': 'mkdir -p /Users/yangmw/Personal/Works/Agent/mymodule'}, name='bash', type='tool_use')]}
+# from prompt import TOOL_DESC, REACT_PROMPT
 
-# --- sub message 2 ---
-# {'role': 'user', 'content': [{'type': 'tool_result', 'tool_use_id': 'call_9e1cab133187483cb7834a75', 'content': '(no output)'}]}
 
-# --- sub message 3 ---
-# {'role': 'assistant', 'content': [ToolUseBlock(id='call_f25ae56a4f024ed79c9e8c9a', caller=None, input={'path': '/Users/yangmw/Personal/Works/Agent/mymodule/core.py', 'content': 'def greet(name: str) -> str:\n    """Return a greeting string for the given name."""\n    return f"Hello, {name}!"\n'}, name='write_file', type='tool_use'), ToolUseBlock(id='call_7c7f7cbaed824a54b8e2ca69', caller=None, input={'path': '/Users/yangmw/Personal/Works/Agent/mymodule/utils.py', 'content': 'def format_message(message: str) -> str:\n    """Uppercase and strip the given message."""\n    return message.strip().upper()\n'}, name='write_file', type='tool_use'), ToolUseBlock(id='call_06a8e28c6b9c4b15a508e731', caller=None, input={'path': '/Users/yangmw/Personal/Works/Agent/mymodule/__init__.py', 'content': 'from .core import greet\n\n__all__ = ["greet"]\n'}, name='write_file', type='tool_use')]}
-
-# --- sub message 4 ---
-# {'role': 'user', 'content': [{'type': 'tool_result', 'tool_use_id': 'call_f25ae56a4f024ed79c9e8c9a', 'content': 'Wrote 113 bytes'}, {'type': 'tool_result', 'tool_use_id': 'call_7c7f7cbaed824a54b8e2ca69', 'content': 'Wrote 125 bytes'}, {'type': 'tool_result', 'tool_use_id': 'call_06a8e28c6b9c4b15a508e731', 'content': 'Wrote 45 bytes'}]}
-
-# --- sub message 5 ---
-# {'role': 'assistant', 'content': [ToolUseBlock(id='call_6690772cc2054480bd6f454a', caller=None, input={'command': 'cd /Users/yangmw/Personal/Works/Agent && python3 -c "\nfrom mymodule import greet\nfrom mymodule.utils import format_message\n\n# Test greet\nassert greet(\'World\') == \'Hello, World!\', f\'greet failed: {greet(\\"World\\")}\'\nassert greet(\'Alice\') == \'Hello, Alice!\', f\'greet failed: {greet(\\"Alice\\")}\'\n\n# Test format_message\nassert format_message(\'  hello  \') == \'HELLO\', f\'format_message failed: {format_message(\\"  hello  \\")}\'\nassert format_message(\'  Hello, World!  \') == \'HELLO, WORLD!\', f\'format_message failed: {format_message(\\"  Hello, World!  \\")}\'\n\nprint(\'All tests passed!\')\n"\n'}, name='bash', type='tool_use')]}
-
-# --- sub message 6 ---
-# {'role': 'user', 'content': [{'type': 'tool_result', 'tool_use_id': 'call_6690772cc2054480bd6f454a', 'content': 'All tests passed!'}]}
-
-# --- sub message 7 ---
-# {'role': 'assistant', 'content': [TextBlock(citations=None, text='All files have been created and verified. Here\'s a summary of what was set up:\n\n**`/Users/yangmw/Personal/Works/Agent/mymodule/`**\n\n| File | Contents |\n|---|---|\n| **`__init__.py`** | Imports `greet` from `.core` and exports it via `__all__`, so users can do `from mymodule import greet`. |\n| **`core.py`** | Defines `greet(name: str) -> str` which returns `f"Hello, {name}!"`. |\n| **`utils.py`** | Defines `format_message(message: str) -> str` which strips whitespace and uppercases the message. |\n\nAll three functions were tested and pass as expected.', type='text')]}
-# All files have been created and verified. Here's a summary of what was set up:
-
-# **`/Users/yangmw/Personal/Works/Agent/mymodule/`**
-
-# | File | Contents |
-# |---|---|
-# | **`__init__.py`** | Imports `greet` 
-# from .core import greet
-
-# __all__ = ["greet"]
+# class Agent:
+#     def __init__(self) -> None:
+#         self.tool = Tools()
+#         self.sys
+# > read_file:
 # def greet(name: str) -> str:
-#     """Return a greeting string for the given name."""
-#     return f"Hello, {name}!"
-# def format_message(message: str) -> str:
-#     """Uppercase and strip the given message."""
-#     return message.strip().upper()
-# greet("World")  -> Hello, World!
-# format_message("  hello  ") -> HELLO
+#     """Return a greeting message for the given name.
 
-# All tests passed! ✅
+#     Args:
+#         name: The name of the person to greet.
+
+#     Returns:
+#         A greeting string in the form ``"Hello
+# > read_file:
+# from typing import Dict, List
+# from openai import OpenAI
+
+# class OllamaChat():
+#     def __init__(self, model: str = "qwen2.5:7b") -> None:
+#         self.client = OpenAI(
+#             base_url="http://local
+# > read_file:
+# from Agent import Agent
+
+# agent = Agent()
+# response, _ = agent.text_completion(text='特朗普哪一年出生的？', history=[])
+# print(response)
+# > read_file:
+# TOOL_DESC = """
+# {name_for_model}: Call this tool to interact with the {name_for_human} API. 
+
+# What is the {name_for_human} API useful for? {description_for_model} 
+
+# Parameters: {parameters} Format the
+# > read_file:
+
+# > read_file:
+# from Tools.datetime_tool import DatetimeTool
+# from Tools.search_tool import SearchTool
+
+
+# class Tools:
+#     def __init__(self):
+#         self.available_tools = {
+#             "search": SearchTool(),
+      
+# > read_file:
+# #!/usr/bin/env python3
+# # Harness: the loop -- the model's first connection to the real world.
+# """
+# s01_agent_loop.py - The Agent Loop
+
+# The entire secret of an AI coding agent in one pattern:
+
+#     while
+# > read_file:
+# #!/usr/bin/env python3
+# # Harness: tool dispatch -- expanding what the model can reach.
+# """
+# s02_tool_use.py - Tools
+
+# The agent loop from s01 didn't change. We just added tools to the array
+# and a dispat
+# > read_file:
+# #!/usr/bin/env python3
+# # Harness: planning -- keeping the model on course without scripting the route.
+# # 让模型保持在正确的轨道上，而不是事先把路线脚本化。
+# """
+# s03_todo_write.py - TodoWrite
+
+# The model tracks its own progress 
+# > read_file:
+# #!/usr/bin/env python3
+# # Harness: context isolation -- protecting the model's clarity of thought.
+# # 上下文隔离，保护模型思维清晰。
+# """
+# s04_subagent.py - Subagents
+
+# Spawn a child agent with fresh messages=[]. The chi
+# > read_file:
+# #!/usr/bin/env python3
+# # Harness: on-demand knowledge -- domain expertise, loaded when the model asks.
+# # "用到什么知识, 临时加载什么知识" -- 通过 tool_result 注入, 不塞 system prompt。
+# # Harness 层: 按需知识 -- 模型开口要时才给的领域专长。
+
+# > read_file:
+# #!/usr/bin/env python3
+# # Harness: compression -- clean memory for infinite sessions.  
+# # 压缩 -- 干净的记忆, 无限的会话。
+
+# # 核心不都是agent loop吗，langgraph的显式图和这个手工的agent原理上区别在哪？
+
+# # 这个：
+# # - LLM 决定控制流
+# # - 控制流隐含在 prompt
+# [auto_compact triggered]
+# [transcript saved: /Users/yangmw/Personal/Works/Agent/.transcripts/transcript_1778493238.jsonl]
 
 # ===== FULL MESSAGES DEBUG =====
-
+# message 0 已经不是“原始历史”，而是被 compact 机制“原地改写”过的历史快照。
 # --- message 0 ---
-# {'role': 'user', 'content': 'Use a task to create a new module, then verify it from here'}
+# {'role': 'user', 'content': '[Conversation compressed. Transcript: /Users/yangmw/Personal/Works/Agent/.transcripts/transcript_1778493238.jsonl]\n\n**1) What was accomplished:**\n- Read and analyzed all 4 Python files in the `skills/` directory: `minimal-agent.py` (minimal agent template), `subagent-pattern.py` (Task tool for context isolation), `tool-templates.py` (tool definitions/implementations), and `init_agent.py` (project scaffolding script).\n- Previously, a `mymodule` package was created at `/Users/yangmw/Personal/Works/Agent/mymodule/` with `greet()` in `core.py`, `format_message()` in `utils.py`, and proper `__init__.py` exports. All functions were tested and verified.\n\n**2) Current state:**\n- The agent (running `s06_context_compact.py`) has completed the file-reading task. The conversation history has grown significantly, and `micro_compact` has already replaced older tool results with `[Previous: used bash]` placeholders. The auto_compact threshold (5000 tokens) is likely approaching or exceeded.\n- The interactive prompt (`s01 >>`) is awaiting a new user command.\n\n**3) Key decisions made:**\n- `micro_compact` (Layer 1) preserves `read_file` outputs as source of truth, while replacing other old tool results with placeholders.\n- `auto_compact` (Layer 2) saves full transcripts to `.transcripts/` before summarizing, ensuring no data loss.\n- The compact tool (Layer 3) allows manual compression triggered by the model.\n- Subagents use isolated context (no parent history) to prevent context pollution, with filtered tools per agent type (e.g., "explore" is read-only).'}
 
 # --- message 1 ---
-# {'role': 'assistant', 'content': [ToolUseBlock(id='call_4c7bd65ab5b64d16bc259327', caller=None, input={'description': 'Create a new module', 'prompt': 'Create a new Python module at /Users/yangmw/Personal/Works/Agent/mymodule/. The module should include:\n\n1. An `__init__.py` that exports the main function.\n2. A `core.py` file with a function called `greet(name: str) -> str` that returns a greeting string like "Hello, {name}!".\n3. A `utils.py` file with a helper function `format_message(message: str) -> str` that uppercases and strips the message.\n\nMake sure the `__init__.py` properly imports and exposes `greet` from `core.py`.'}, name='task', type='tool_use')]}
-
-# --- message 2 ---
-# {'role': 'user', 'content': [{'type': 'tool_result', 'tool_use_id': 'call_4c7bd65ab5b64d16bc259327', 'content': 'All files have been created and verified. Here\'s a summary of what was set up:\n\n**`/Users/yangmw/Personal/Works/Agent/mymodule/`**\n\n| File | Contents |\n|---|---|\n| **`__init__.py`** | Imports `greet` from `.core` and exports it via `__all__`, so users can do `from mymodule import greet`. |\n| **`core.py`** | Defines `greet(name: str) -> str` which returns `f"Hello, {name}!"`. |\n| **`utils.py`** | Defines `format_message(message: str) -> str` which strips whitespace and uppercases the message. |\n\nAll three functions were tested and pass as expected.'}]}
-
-# --- message 3 ---
-# {'role': 'assistant', 'content': [TextBlock(citations=None, text='The task completed. Now let me verify the created module from here by reading the files and running a quick test:', type='text'), ToolUseBlock(id='call_0dcac6a00cc5465eb0e5f489', caller=None, input={'path': '/Users/yangmw/Personal/Works/Agent/mymodule/__init__.py'}, name='read_file', type='tool_use'), ToolUseBlock(id='call_15c6fb267b894cb3ae198487', caller=None, input={'path': '/Users/yangmw/Personal/Works/Agent/mymodule/core.py'}, name='read_file', type='tool_use'), ToolUseBlock(id='call_a6054c8d909d4e55ba2383c4', caller=None, input={'path': '/Users/yangmw/Personal/Works/Agent/mymodule/utils.py'}, name='read_file', type='tool_use')]}
-
-# --- message 4 ---
-# {'role': 'user', 'content': [{'type': 'tool_result', 'tool_use_id': 'call_0dcac6a00cc5465eb0e5f489', 'content': 'from .core import greet\n\n__all__ = ["greet"]'}, {'type': 'tool_result', 'tool_use_id': 'call_15c6fb267b894cb3ae198487', 'content': 'def greet(name: str) -> str:\n    """Return a greeting string for the given name."""\n    return f"Hello, {name}!"'}, {'type': 'tool_result', 'tool_use_id': 'call_a6054c8d909d4e55ba2383c4', 'content': 'def format_message(message: str) -> str:\n    """Uppercase and strip the given message."""\n    return message.strip().upper()'}]}
-
-# --- message 5 ---
-# {'role': 'assistant', 'content': [TextBlock(citations=None, text='Files look good. Let me run a quick Python test to verify the module works correctly:', type='text'), ToolUseBlock(id='call_05ba6354428d4953974cd3b9', caller=None, input={'command': 'cd /Users/yangmw/Personal/Works/Agent && python3 -c "\nfrom mymodule import greet\nfrom mymodule.utils import format_message\n\n# Test greet()\nassert greet(\'World\') == \'Hello, World!\', \'greet failed\'\nprint(f\'greet(\\"World\\")  -> {greet(\\"World\\")}\')\n\n# Test format_message()\nassert format_message(\'  hello  \') == \'HELLO\', \'format_message failed\'\nprint(f\'format_message(\\"  hello  \\") -> {format_message(\\"  hello  \\")}\')\n\nprint(\'\\nAll tests passed! ✅\')\n"'}, name='bash', type='tool_use')]}
-
-# --- message 6 ---
-# {'role': 'user', 'content': [{'type': 'tool_result', 'tool_use_id': 'call_05ba6354428d4953974cd3b9', 'content': 'greet("World")  -> Hello, World!\nformat_message("  hello  ") -> HELLO\n\nAll tests passed! ✅'}]}
-
-# --- message 7 ---
-# {'role': 'assistant', 'content': [TextBlock(citations=None, text='Everything is verified and working! Here\'s a summary of what was created:\n\n| File | Purpose |\n|---|---|\n| **`mymodule/__init__.py`** | Exports `greet` from `core.py` via `__all__` |\n| **`mymodule/core.py`** | Contains `greet(name)` → returns `"Hello, {name}!"` |\n| **`mymodule/utils.py`** | Contains `format_message(msg)` → strips & uppercases the message |\n\nBoth functions were tested and pass as expected. ✅', type='text')]}
+# {'role': 'assistant', 'content': [TextBlock(citations=None, text="I can see from the conversation summary that we've been working through the Agent project, analyzing the skills directory, creating a `mymodule` package, and understanding the context compaction system. \n\nWhat would you like to do next? Some options based on where we left off:\n\n1. **Continue exploring the Agent project** - dive into other directories or files\n2. **Work on the `mymodule` package** - add more functionality or tests\n3. **Test the context compaction system** - trigger manual compaction and observe behavior\n4. **Build something new** - create a new skill, tool, or agent pattern\n5. **Something else entirely**\n\nWhat's your next command or question?", type='text')]}
 
 # s01 >> 
