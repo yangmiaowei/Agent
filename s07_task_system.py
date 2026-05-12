@@ -46,7 +46,18 @@ SYSTEM = f"You are a coding agent at {WORKDIR}. Use task tools to plan and track
 
 
 # -- TaskManager: CRUD with dependency graph, persisted as JSON files --
+class TaskManager:
+    def __init__(self, tasks_dir: Path):
+        self.dir = tasks_dir
+        self.dir.mkdir(exist_ok=True)
+        self._next_id = self._max_id() + 1
 
+    def _max_id(self) -> int:
+        ids = [int(f.stem.split("_")[1]) for f in self.dir.glob("task_*.json")]
+        return max(ids) if ids else 0
+
+    def _load(self, task_id: int) -> dict:
+        path = 
 
 
 
