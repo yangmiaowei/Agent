@@ -57,7 +57,9 @@ class TaskManager:
         return max(ids) if ids else 0
 
     def _load(self, task_id: int) -> dict:
-        path = 
+        path = self.dir / f"task_{task_id}.json"
+        if not path.exists():
+            raise ValueError(f"Task {task_id} not ")
 
 
 
