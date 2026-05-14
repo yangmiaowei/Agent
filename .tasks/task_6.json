@@ -1,0 +1,10 @@
+{
+  "id": 6,
+  "subject": "Emit",
+  "description": "Implement the emit step — output the transformed data in the target format",
+  "status": "pending",
+  "blockedBy": [
+    4
+  ],
+  "owner": ""
+}
