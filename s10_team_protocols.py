@@ -1,81 +1,80 @@
 #!/usr/bin/env python3
-# Harness: team mailboxes -- multiple models, coordinated through files.
-# "任务太大一个人干不完, 要能分给队友" -- 持久化队友 + JSONL 邮箱。
-# Harness 层: 团队邮箱 -- 多个模型, 通过文件协调。
+# Harness: protocols -- structured handshakes between models.
 
-# Subagent (s04) 是一次性的: 生成、干活、返回摘要、消亡。没有身份, 没有跨调用的记忆。
-# Background Tasks (s08) 能跑 shell 命令, 但做不了 LLM 引导的决策。
+# "队友之间要有统一的沟通规矩" -- 一个 request-response 模式驱动所有协商。
+# Harness 层: 协议 -- 模型之间的结构化握手。
 
-# 真正的团队协作需要三样东西: 
-# (1) 能跨多轮对话存活的持久 Agent, 
-# (2) 身份和生命周期管理, 
-# (3) Agent 之间的通信通道。
+# 问题
+# s09 中队友能干活能通信, 但缺少结构化协调:
+# 关机: 直接杀线程会留下写了一半的文件和过期的 config.json。需要握手 -- 领导请求, 队友批准 (收尾退出) 或拒绝 (继续干)。
+# 计划审批: 领导说 "重构认证模块", 队友立刻开干。高风险变更应该先过审。
+# 两者结构一样: 一方发带唯一 ID 的请求, 另一方引用同一 ID 响应。
 
+# Shutdown Protocol            Plan Approval Protocol
+# ==================           ======================
 
-# message passing vs shared memory
+# Lead             Teammate    Teammate           Lead
+#   |                 |           |                 |
+#   |--shutdown_req-->|           |--plan_req------>|
+#   | {req_id:"abc"}  |           | {req_id:"xyz"}  |
+#   |                 |           |                 |
+#   |<--shutdown_resp-|           |<--plan_resp-----|
+#   | {req_id:"abc",  |           | {req_id:"xyz",  |
+#   |  approve:true}  |           |  approve:true}  |
 
-# # Message Passing
-# * Agent间通过消息通信
-# * 消息是不可变事件
-# * 解耦，稳定，可恢复
-# * 更适合LLM协作
-# * 共享状态越多越复杂
+# Shared FSM:
+#   [pending] --approve--> [approved]
+#   [pending] --reject---> [rejected]
 
-# # Shared Memory
-# * 多Agent共享同一状态
-# * 易发生race condition
-# * 容易上下文污染
-# * 中间推理不应共享
-# * 只共享稳定事实
-
-# 混合架构
-# Agent之间：发消息
-# 长期知识：存vector db / postgres
-# 任务状态：存task store
-# 日志：append-only event log
-# “共享事实” 而不是 “共享思维过程”
+# Trackers:
+#   shutdown_requests = {req_id: {target, status}}
+#   plan_requests     = {req_id: {from, plan, status}}
 
 """
-s09_agent_teams.py - Agent Teams
+s10_team_protocols.py - Team Protocols
 
-Persistent named agents with file-based JSONL inboxes. Each teammate runs
-its own agent loop in a separate thread. Communication via append-only inboxes.
+Shutdown protocol and plan approval protocol, both using the same
+request_id correlation pattern. Builds on s09's team messaging.
 
-    Subagent (s04):  spawn -> execute -> return summary -> destroyed
-    Teammate (s09):  spawn -> work -> idle -> work -> ... -> shutdown
+    Shutdown FSM: pending -> approved | rejected
 
-    .team/config.json                   .team/inbox/
-    +----------------------------+      +------------------+
-    | {"team_name": "default",   |      | alice.jsonl      |
-    |  "members": [              |      | bob.jsonl        |
-    |    {"name":"alice",        |      | lead.jsonl       |
-    |     "role":"coder",        |      +------------------+
-    |     "status":"idle"}       |
-    |  ]}                        |      send_message("alice", "fix bug"):
-    +----------------------------+        open("alice.jsonl", "a").write(msg)
+    Lead                              Teammate
+    +---------------------+          +---------------------+
+    | shutdown_request     |          |                     |
+    | {                    | -------> | receives request    |
+    |   request_id: abc    |          | decides: approve?   |
+    | }                    |          |                     |
+    +---------------------+          +---------------------+
+                                             |
+    +---------------------+          +-------v-------------+
+    | shutdown_response    | <------- | shutdown_response   |
+    | {                    |          | {                   |
+    |   request_id: abc    |          |   request_id: abc   |
+    |   approve: true      |          |   approve: true     |
+    | }                    |          | }                   |
+    +---------------------+          +---------------------+
+            |
+            v
+    status -> "shutdown", thread stops
 
-                                        read_inbox("alice"):
-    spawn_teammate("alice","coder",...)   msgs = [json.loads(l) for l in ...]
-         |                                open("alice.jsonl", "w").close()
-         v                                return msgs  # drain
-    Thread: alice             Thread: bob
-    +------------------+      +------------------+
-    | agent_loop       |      | agent_loop       |
-    | status: working  |      | status: idle     |
-    | ... runs tools   |      | ... waits ...    |
-    | status -> idle   |      |                  |
-    +------------------+      +------------------+
+    Plan approval FSM: pending -> approved | rejected
 
-    5 message types (all declared, not all handled here):
-    +-------------------------+-----------------------------------+
-    | message                 | Normal text message               |
-    | broadcast               | Sent to all teammates             |
-    | shutdown_request        | Request graceful shutdown (s10)   |
-    | shutdown_response       | Approve/reject shutdown (s10)     |
-    | plan_approval_response  | Approve/reject plan (s10)         |
-    +-------------------------+-----------------------------------+
+    Teammate                          Lead
+    +---------------------+          +---------------------+
+    | plan_approval        |          |                     |
+    | submit: {plan:"..."}| -------> | reviews plan text   |
+    +---------------------+          | approve/reject?     |
+                                     +---------------------+
+                                             |
+    +---------------------+          +-------v-------------+
+    | plan_approval_resp   | <------- | plan_approval       |
+    | {approve: true}      |          | review: {req_id,    |
+    +---------------------+          |   approve: true}     |
+                                     +---------------------+
 
-Key insight: "Teammates that can talk to each other."
+    Trackers: {request_id: {"target|from": name, "status": "pending|..."}}
+
+Key insight: "Same request_id correlation pattern, two domains."
 """
 
 import json
@@ -83,6 +82,7 @@ import os
 import subprocess
 import threading
 import time
+import uuid
 from pathlib import Path
 
 from anthropic import Anthropic
@@ -99,7 +99,7 @@ MODEL = os.environ["MODEL_ID"]
 TEAM_DIR = WORKDIR / ".team"
 INBOX_DIR = TEAM_DIR / "inbox"
 
-SYSTEM = f"You are a team lead at {WORKDIR}. Spawn teammates and communicate via inboxes."
+SYSTEM = f"You are a team lead at {WORKDIR}. Manage teammates with shutdown and plan approval protocols."
 
 VALID_MSG_TYPES = {
     "message",
@@ -108,6 +108,11 @@ VALID_MSG_TYPES = {
     "shutdown_response",
     "plan_approval_response",
 }
+
+# -- Request trackers: correlate by request_id --
+shutdown_requests = {}
+plan_requests = {}
+_tracker_lock = threading.Lock()
 
 
 # -- MessageBus: JSONL inbox per teammate --
@@ -138,14 +143,7 @@ class MessageBus:  # 消息总线，收/发/广播消息
         if not inbox_path.exists():
             return []
         messages = []
-        for line in inbox_path.read_text().strip().splitlines():  # 可以把 () 理解成：执行这个函数（方法）
-            # 如果是inbox_path.read_text.strip()，相当于拿到的不是文件内容，而是 方法对象（method object）
-            # x = inbox_path.read_text
-            # print(type(x))
-            # 输出类似：<class 'method'>
-            # 然后代码继续：x.strip()
-            # 但方法对象没有 strip() 方法，所以会报错：
-            # AttributeError: 'method' object has no attribute 'strip'
+        for line in inbox_path.read_text().strip().splitlines():
             if line:
                 messages.append(json.loads(line))
             inbox_path.write_text("")  # 清空文件内容
@@ -163,7 +161,7 @@ class MessageBus:  # 消息总线，收/发/广播消息
 BUS = MessageBus(INBOX_DIR)
 
 
-# -- TeammateManager: persistent named agents with config.json --
+# -- TeammateManager with shutdown + plan approval --
 class TeammatedManager:
     def __init__(self, team_dir: Path):
         self.dir = team_dir
@@ -187,7 +185,6 @@ class TeammatedManager:
         return None
 
     def spawn(self, name: str, role: str, prompt: str) -> str:
-        # 创建一个持久存在的队友（Agent），并让它在独立线程中运行
         member = self._find_member(name)
         if member:
             if member["status"] not in ("idle", "shutdown"):
@@ -197,8 +194,8 @@ class TeammatedManager:
         else:
             member = {"name": name, "role": role, "status": "working"}
             self.config["members"].append(member)
-        self._save_config()  # 更新 config
-        thread = threading.Thread(  # 新建一个独立Agent开始工作
+        self._save_config()
+        thread = threading.Thread(
             target=self._teammate_loop,
             args=(name, role, prompt),
             daemon=True,
@@ -211,22 +208,26 @@ class TeammatedManager:
     def _teammate_loop(self, name: str, role: str, prompt: str):
         sys_prompt = (
             f"You are '{name}', role: {role}, at {WORKDIR}."
-            f"Use send_message to communicate. Complete your task."
+            f"Submit plans via plan_approval before major work. "
+            f"Respond to shutdown_request with shutdown_response."
         )
         messages = [{"role": "user", "content": prompt}]
         tools = self._teammate_tools()
+        should_exit = False
         for _ in range(50):
             inbox = BUS.read_inbox(name)  # 读收件箱
             for msg in inbox:
                 messages.append({"role": "user", "content": json.dumps(msg)})
+            if should_exit:
+                break
             try:
                 response = client.messages.create(
                     model=MODEL,
                     system=sys_prompt,
                     messages=messages,
-                    tools=too,
+                    tools=tools,
                     max_tokens=8000,
-                )  # 调用模型开始思考
+                )
             except Exception:
                 break
             messages.append({"role": "assistant", "content": response.content})
@@ -242,7 +243,9 @@ class TeammatedManager:
                         "tool_use_id": block.id,
                         "content": str(output),
                     })
-            messages.append({"role": "user", "content": results})  # Anthropic 的消息模型里只有：user assistant 两个角色
+                    if block.name == "shutdown_response" and block.input.get("approve"):
+                        should_exit = True
+            messages.append({"role": "user", "content": results})
         member = self._find_member(name)
         if member and member["status"] != "shutdown":
             member["status"] = "idle"
@@ -261,6 +264,47 @@ class TeammatedManager:
             return BUS.send(sender, args["to"], args["content"], args.get("msg_type", "message"))
         if tool_name == "read_inbox":
             return json.dumps(BUS.read_inbox(sender), indent=2)
+
+        if tool_name == "shutdown_response":
+            req_id = args["request_id"]
+            approve = args["approve"]
+            with _tracker_lock:
+                if req_id in shutdown_requests:
+                    shutdown_requests[req_id]["status"] = "approved" if approve else "rejected"
+            BUS.send(
+                sender, "lead", args.get("reason", ""),
+                "shutdown_response", {"request_id": req_id, "approve": approve},
+            )
+            return f"Shutdown {'approved' if approve else 'rejected'}"
+
+            # shutdown_requests（状态机）
+            # shutdown_requests = {
+            #     "abc123": {
+            #         "target": "coder",
+            #         "status": "pending"
+            #     }
+            # }
+
+        if tool_name == "plan_approval":
+            plan_text = args.get("paln", "")
+            req_id = str(uuid.uuid4())[:8]
+            with _tracker_lock:
+                plan_requests[req_id] = {"from": sender, "plan": plan_text, "status": "pending"}
+            BUS.send(
+                sender, "lead", plan_text, "plan_approval_response",
+                {"request_id": req_id, "plan": plan_text},
+            )
+            return f"Plan submitted (request_id={req_id}). Waiting for lead approval."
+
+            # plan_requests（第二个状态机）
+            # plan_requests = {
+            #     "c8f1a7e2": {
+            #         "from": "coder",
+            #         "plan": "...",
+            #         "status": "pending"
+            #     }
+            # }
+
         return f"Unknow tool: {tool_name}"
 
     def _teammate_tools(self) -> list:
@@ -277,6 +321,10 @@ class TeammatedManager:
              "input_schema": {"type": "object", "properties": {"to": {"type": "string"}, "content": {"type": "string"}, "msg_type": {"type": "string", "enum": list(VALID_MSG_TYPES)}, "required": ["to", "content"]}}},  # enum即只能从指定列表中选择
             {"name": "read_inbox", "description": "Read and drain your inbox.",
              "input_schema": {"type": "object", "properties": {}}},
+            {"name": "shutdown_response", "description": "Respond to a shutdown request. Approve to shut down, reject to keep working.",
+             "input_schema": {"type": "object", "properties": {"request_id": {"type": "string"}, "approve": {"type": "boolean"}, "reason": {"type": "string"}}, "required": ["request_id", "approve"]}},
+            {"name": "plan_approval", "description": "Submit a plan for lead approval. Provide plan text.",
+             "input_schema": {"type": "object", "properties": {"plan": {"type": "string"}}, "required": ["plan"]}},
         ]
 
     def list_all(self) -> str:
@@ -342,7 +390,36 @@ def _run_edit(path: str, old_text: str, new_text: str) -> str:
     except Exception as e:
         return f"Error: {e}"
 
+# -- Lead-specific protocol handlers --
+def handle_shutdown_request(teammate: str) -> str:
+    req_id = str(uuid.uuid4())[:8]
+    with _tracker_lock:
+        shutdown_requests[req_id] = {"target": teammate, "status": "pending"}
+    BUS.send(
+        "lead", teammate, "Please shut down gracefully.",
+        "shutdown_request", {"request_id": req_id},
+    )
+    return f"Shutdown request {req_id} sent to '{teammate}' (status: pending)"
 
+def handle_plan_review(request_id: str, approve: bool, feedback: str = "") -> str:
+    with _tracker_lock:
+        req = plan_requests.get(request_id)
+    if not req:
+        return f"Error: Unknown plan request_id '{request_id}'"
+    with _tracker_lock:
+        req["status"] = "approved" if approve else "rejected"
+    BUS.send(
+        "lead", req["from"], feedback, "plan_approval_response",
+        {"request_id": request_id, "approve": approve, "feedback": feedback},
+    )
+    return f"Plan {req['status']} for '{req['from']}'"
+
+def _check_shutdown_status(request_id: str) -> str:
+    with _tracker_lock:
+        return json.dumps(shutdown_requests.get(request_id, {"error": "not found"}))
+
+
+# -- Lead tool dispatch (12 tools) --
 TOOL_HANDLERS = {
     "bash":             lambda **kw: _run_bash(kw["command"]),
     "read_file":        lambda **kw: _run_read(kw["path"], kw.get("limit")),
@@ -353,6 +430,9 @@ TOOL_HANDLERS = {
     "send_message":     lambda **kw: BUS.send("lead", kw["to"], kw["content"], kw.get("msg_type", "message")),
     "read_inbox":       lambda **kw: json.dumps(BUS.read_inbox("lead"), indent=2),
     "broadcast":        lambda **kw: BUS.broadcast("lead", kw["content"], TEAM.member_names()),
+    "shutdown_request":  lambda **kw: handle_shutdown_request(kw["teammate"]),
+    "shutdown_response": lambda **kw: _check_shutdown_status(kw.get("request_id", "")),
+    "plan_approval":     lambda **kw: handle_plan_review(kw["request_id"], kw["approve"], kw.get("feedback", "")),
 }
 
 TOOLS = [
@@ -374,6 +454,12 @@ TOOLS = [
      "input_schema": {"type": "object", "properties": {}}},
     {"name": "broadcast", "description": "Send a message to all teammates.",
      "input_schema": {"type": "object", "properties": {"content": {"type": "string"}}, "required": ["content"]}},
+     {"name": "shutdown_request", "description": "Request a teammate to shut down gracefully. Returns a request_id for tracking.",
+     "input_schema": {"type": "object", "properties": {"teammate": {"type": "string"}}, "required": ["teammate"]}},
+    {"name": "shutdown_response", "description": "Check the status of a shutdown request by request_id.",
+     "input_schema": {"type": "object", "properties": {"request_id": {"type": "string"}}, "required": ["request_id"]}},
+    {"name": "plan_approval", "description": "Approve or reject a teammate's plan. Provide request_id + approve + optional feedback.",
+     "input_schema": {"type": "object", "properties": {"request_id": {"type": "string"}, "approve": {"type": "boolean"}, "feedback": {"type": "string"}}, "required": ["request_id", "approve"]}},
 ]
 
 
@@ -438,49 +524,74 @@ if __name__ == "__main__":
         #             print(block.text)
         print()
 
-
-# s01 >> Spawn alice (coder) and bob (tester). Have alice send bob a message.
+# s01 >> Spawn alice as a coder. Then request her shutdown.
 # > spawn_teammate:
 # Spawned 'alice' (role: coder)
-# > spawn_teammate:
-# Spawned 'bob' (role: tester)
-# > send_message:
-# Sent message to alice
-# > read_inbox:
-# []
-# > list_teammates:
-# Unknown tool: list_teammates
-# > list_teammates:
-# Unknown tool: list_teammates
+# > shutdown_request:
+# Shutdown request 71a8424c sent to 'alice' (status: pending)
 
 # ===== FULL MESSAGES DEBUG =====
 
 # --- message 0 ---
-# {'role': 'user', 'content': 'Spawn alice (coder) and bob (tester). Have alice send bob a message.'}
+# {'role': 'user', 'content': 'Spawn alice as a coder. Then request her shutdown.'}
 
 # --- message 1 ---
-# {'role': 'assistant', 'content': [TextBlock(citations=None, text="I'll spawn both teammates first, then have Alice send Bob a message.", type='text'), ToolUseBlock(id='call_4569b79b2fe346fd83dba362', caller=None, input={'name': 'alice', 'role': 'coder', 'prompt': 'You are Alice, a coder teammate. You write clean, efficient code. When you receive messages, respond appropriately. You can communicate with other teammates by sending messages.'}, name='spawn_teammate', type='tool_use'), ToolUseBlock(id='call_a363e274746340e1a5eaea2e', caller=None, input={'name': 'bob', 'role': 'tester', 'prompt': 'You are Bob, a tester teammate. You write thorough tests and verify code quality. When you receive messages, respond appropriately. You can communicate with other teammates by sending messages.'}, name='spawn_teammate', type='tool_use')]}
+# {'role': 'assistant', 'content': [TextBlock(citations=None, text="I'll spawn alice as a coder and then immediately request her shutdown.", type='text'), ToolUseBlock(id='call_c4eecdb0168e49a1a8d8d7f5', caller=None, input={'name': 'alice', 'role': 'coder', 'prompt': 'You are a coder teammate named alice. Follow instructions from the lead.'}, name='spawn_teammate', type='tool_use')]}
 
 # --- message 2 ---
-# {'role': 'user', 'content': [{'type': 'tool_result', 'tool_use_id': 'call_4569b79b2fe346fd83dba362', 'content': "Spawned 'alice' (role: coder)"}, {'type': 'tool_result', 'tool_use_id': 'call_a363e274746340e1a5eaea2e', 'content': "Spawned 'bob' (role: tester)"}]}
+# {'role': 'user', 'content': [{'type': 'tool_result', 'tool_use_id': 'call_c4eecdb0168e49a1a8d8d7f5', 'content': "Spawned 'alice' (role: coder)"}]}
 
 # --- message 3 ---
-# {'role': 'assistant', 'content': [TextBlock(citations=None, text="Both teammates are spawned. Now I'll have Alice send a message to Bob.", type='text'), ToolUseBlock(id='call_2ec62f0a14c0496fa5d8712b', caller=None, input={'to': 'alice', 'content': "Hi Alice, please send a message to Bob introducing yourself and letting him know you're ready to collaborate."}, name='send_message', type='tool_use')]}
+# {'role': 'assistant', 'content': [TextBlock(citations=None, text='Alice has been spawned. Now let me request her shutdown.', type='text'), ToolUseBlock(id='call_3387fb41ae69442586825253', caller=None, input={'teammate': 'alice'}, name='shutdown_request', type='tool_use')]}
 
 # --- message 4 ---
-# {'role': 'user', 'content': [{'type': 'tool_result', 'tool_use_id': 'call_2ec62f0a14c0496fa5d8712b', 'content': 'Sent message to alice'}]}
+# {'role': 'user', 'content': [{'type': 'tool_result', 'tool_use_id': 'call_3387fb41ae69442586825253', 'content': "Shutdown request 71a8424c sent to 'alice' (status: pending)"}]}
 
 # --- message 5 ---
-# {'role': 'assistant', 'content': [TextBlock(citations=None, text='Let me check my inbox to see if Alice has responded, and also verify the team status.', type='text'), ToolUseBlock(id='call_59b5db62286548e1a110d293', caller=None, input={}, name='read_inbox', type='tool_use'), ToolUseBlock(id='call_c4ff6ed5c5a14938a36a8ff8', caller=None, input={}, name='list_teammates', type='tool_use')]}
+# {'role': 'assistant', 'content': [TextBlock(citations=None, text="Here's a summary of what happened:\n\n1. **Spawned alice** as a coder — she's now active.\n2. **Sent a shutdown request** to alice (request ID: `71a8424c`) — currently pending.\n\nAlice should acknowledge the shutdown request and wind down. Let me know if you'd like me to check the status of the shutdown or take any further action!", type='text')]}
+
+# s01 >> List teammates to see alice's status after shutdown approval
+# > list_teammates:
+# Unknown tool: list_teammates
+# > shutdown_response:
+# {"target": "alice", "status": "pending"}
+
+# ===== FULL MESSAGES DEBUG =====
+
+# --- message 0 ---
+# {'role': 'user', 'content': 'Spawn alice as a coder. Then request her shutdown.'}
+
+# --- message 1 ---
+# {'role': 'assistant', 'content': [TextBlock(citations=None, text="I'll spawn alice as a coder and then immediately request her shutdown.", type='text'), ToolUseBlock(id='call_c4eecdb0168e49a1a8d8d7f5', caller=None, input={'name': 'alice', 'role': 'coder', 'prompt': 'You are a coder teammate named alice. Follow instructions from the lead.'}, name='spawn_teammate', type='tool_use')]}
+
+# --- message 2 ---
+# {'role': 'user', 'content': [{'type': 'tool_result', 'tool_use_id': 'call_c4eecdb0168e49a1a8d8d7f5', 'content': "Spawned 'alice' (role: coder)"}]}
+
+# --- message 3 ---
+# {'role': 'assistant', 'content': [TextBlock(citations=None, text='Alice has been spawned. Now let me request her shutdown.', type='text'), ToolUseBlock(id='call_3387fb41ae69442586825253', caller=None, input={'teammate': 'alice'}, name='shutdown_request', type='tool_use')]}
+
+# --- message 4 ---
+# {'role': 'user', 'content': [{'type': 'tool_result', 'tool_use_id': 'call_3387fb41ae69442586825253', 'content': "Shutdown request 71a8424c sent to 'alice' (status: pending)"}]}
+
+# --- message 5 ---
+# {'role': 'assistant', 'content': [TextBlock(citations=None, text="Here's a summary of what happened:\n\n1. **Spawned alice** as a coder — she's now active.\n2. **Sent a shutdown request** to alice (request ID: `71a8424c`) — currently pending.\n\nAlice should acknowledge the shutdown request and wind down. Let me know if you'd like me to check the status of the shutdown or take any further action!", type='text')]}
 
 # --- message 6 ---
-# {'role': 'user', 'content': [{'type': 'tool_result', 'tool_use_id': 'call_59b5db62286548e1a110d293', 'content': '[]'}, {'type': 'tool_result', 'tool_use_id': 'call_c4ff6ed5c5a14938a36a8ff8', 'content': 'Unknown tool: list_teammates'}]}
+# {'role': 'user', 'content': "List teammates to see alice's status after shutdown approval"}
 
 # --- message 7 ---
-# {'role': 'assistant', 'content': [ToolUseBlock(id='call_eb89fa05e20542bbb78a5a83', caller=None, input={}, name='list_teammates', type='tool_use')]}
+# {'role': 'assistant', 'content': [ToolUseBlock(id='call_4c9de743a3164730aa2d3e2c', caller=None, input={}, name='list_teammates', type='tool_use')]}
 
 # --- message 8 ---
-# {'role': 'user', 'content': [{'type': 'tool_result', 'tool_use_id': 'call_eb89fa05e20542bbb78a5a83', 'content': 'Unknown tool: list_teammates'}]}
+# {'role': 'user', 'content': [{'type': 'tool_result', 'tool_use_id': 'call_4c9de743a3164730aa2d3e2c', 'content': 'Unknown tool: list_teammates'}]}
 
 # --- message 9 ---
-# {'role': 'assistant', 'content': [TextBlock(citations=None, text="Here's a summary of what was done:\n\n1. ✅ **Spawned Alice (coder)** — She's up and running, ready to write code.\n2. ✅ **Spawned Bob (tester)** — He's up and running, ready to test.\n3. ✅ **Sent Alice a message** — I asked Alice to send Bob a message introducing herself.\n\nAlice has received the request and should be sending Bob a message shortly. The team is set up and ready to collaborate! 🚀", type='text')]}
+# {'role': 'assistant', 'content': [TextBlock(citations=None, text='Let me check the shutdown status using the request ID:', type='text'), ToolUseBlock(id='call_aa3ed5b3cc07438cb7f9a9d2', caller=None, input={'request_id': '71a8424c'}, name='shutdown_response', type='tool_use')]}
+
+# --- message 10 ---
+# {'role': 'user', 'content': [{'type': 'tool_result', 'tool_use_id': 'call_aa3ed5b3cc07438cb7f9a9d2', 'content': '{"target": "alice", "status": "pending"}'}]}
+
+# --- message 11 ---
+# {'role': 'assistant', 'content': [TextBlock(citations=None, text="Alice's shutdown is still **pending** — she hasn't responded yet. It seems she may need more time to acknowledge the shutdown request. Would you like me to:\n\n1. **Wait and check again** for her shutdown response?\n2. **Send her a message** reminding her to approve the shutdown?", type='text')]}
+
+# s01 >> 
