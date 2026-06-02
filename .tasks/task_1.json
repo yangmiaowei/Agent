@@ -1,8 +1,8 @@
 {
   "id": 1,
-  "subject": "Setup project",
-  "description": "Initialize the project structure and configuration",
-  "status": "completed",
-  "blockedBy": [],
-  "owner": ""
+  "subject": "Create a README.md for the project",
+  "description": "Write a comprehensive README.md file that describes the project structure, setup instructions, and usage examples.",
+  "status": "in_progress",
+  "owner": "lead",
+  "blockedBy": null
 }

@@ -1,0 +1,26 @@
+[
+  {
+    "id": 1,
+    "title": "Set up project scaffolding",
+    "description": "Initialize the project directory structure, create package.json, and set up basic config files.",
+    "status": "in-progress",
+    "priority": "high",
+    "claimed_by": "alice2"
+  },
+  {
+    "id": 2,
+    "title": "Implement core API endpoints",
+    "description": "Create the main REST API endpoints including /health, /users, and /tasks with CRUD operations.",
+    "status": "in-progress",
+    "priority": "high",
+    "claimed_by": "bob2"
+  },
+  {
+    "id": 3,
+    "title": "Write unit tests for API",
+    "description": "Write comprehensive unit tests covering all API endpoints, edge cases, and error handling.",
+    "status": "in-progress",
+    "priority": "medium",
+    "claimed_by": "carol"
+  }
+]

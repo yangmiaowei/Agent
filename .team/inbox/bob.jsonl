@@ -1,0 +1,2 @@
+{"type": "message", "from": "lead", "content": "New tasks are on the board! Check /Users/yangmw/Personal/Works/Agent/taskboard.json and claim one open task by updating its status to \"in-progress\" and adding \"claimed_by\": \"bob\". Only claim ONE task.", "timestamp": 1780367069.015222}
+{"type": "shutdown_request", "from": "lead", "content": "Please shut down gracefully.", "timestamp": 1780367096.405249, "request_id": "2e0c5f6c"}

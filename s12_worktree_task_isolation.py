@@ -1,51 +1,149 @@
 #!/usr/bin/env python3
-# Harness: autonomy -- models that find work without being told.
+# Harness: directory isolation -- parallel execution lanes that never collide.
 
-# "队友自己看看板, 有活就认领" -- 不需要领导逐个分配, 自组织。
-# Harness 层: 自治 -- 模型自己找活干, 无需指派。
+# "各干各的目录, 互不干扰" -- 任务管目标, worktree 管目录, 按 ID 绑定。
+# Harness 层: 目录隔离 -- 永不碰撞的并行执行通道。
 
-# 一个细节: Context Compact (s06) 后 Agent 可能忘了自己是谁。身份重注入解决这个问题。
 """
-s11_autonomous_agents.py - Autonomous Agents
+s12_worktree_task_isolation.py - Worktree + Task Isolation
 
-Idle cycle with task board polling, auto-claiming unclaimed tasks, and
-identity re-injection after context compression. Builds on s10's protocols.
+Directory-level isolation for parallel task execution.
+Tasks are the control plane and worktrees are the execution plane.
 
-    Teammate lifecycle:
-    +-------+
-    | spawn |
-    +---+---+
-        |
-        v
-    +-------+  tool_use    +-------+
-    | WORK  | <----------- |  LLM  |
-    +---+---+              +-------+
-        |
-        | stop_reason != tool_use
-        v
-    +--------+
-    | IDLE   | poll every 5s for up to 60s
-    +---+----+
-        |
-        +---> check inbox -> message? -> resume WORK
-        |
-        +---> scan .tasks/ -> unclaimed? -> claim -> resume WORK
-        |
-        +---> timeout (60s) -> shutdown
+    .tasks/task_12.json
+      {
+        "id": 12,
+        "subject": "Implement auth refactor",
+        "status": "in_progress",
+        "worktree": "auth-refactor"
+      }
 
-    Identity re-injection after compression:
-    messages = [identity_block, ...remaining...]
-    "You are 'coder', role: backend, team: my-team"
+    .worktrees/index.json
+      {
+        "worktrees": [
+          {
+            "name": "auth-refactor",
+            "path": ".../.worktrees/auth-refactor",
+            "branch": "wt/auth-refactor",
+            "task_id": 12,
+            "status": "active"
+          }
+        ]
+      }
 
-Key insight: "The agent finds work itself."
+Key insight: "Isolate by directory, coordinate by task ID."
 """
+# 到 s11, Agent 已经能自主认领和完成任务。但所有任务共享一个目录。两个 Agent 同时重构不同模块 -- A 改 config.py, B 也改 config.py, 未提交的改动互相污染, 谁也没法干净回滚。
+# 任务板管 "做什么" 但不管 "在哪做"。解法: 给每个任务一个独立的 git worktree 目录, 用任务 ID 把两边关联起来。
+
+# 本质问题：
+# ❌ 任务是隔离的
+# ❌ 但执行环境不是隔离的
+
+# Task 系统是“逻辑并发”
+# Git 工作区是“物理共享”
+
+# 解决方案：
+# 每个任务 → 一个独立的 Git working directory（worktree）隔离执行环境
+
+# 控制面                               执行面
+# Control plane (.tasks/)             Execution plane (.worktrees/)
+# +------------------+                +------------------------+
+# | task_1.json      |                | auth-refactor/         |
+# |   status: in_progress  <------>   branch: wt/auth-refactor
+# |   worktree: "auth-refactor"   |   task_id: 1             |
+# +------------------+                +------------------------+
+# | task_2.json      |                | ui-login/              |
+# |   status: pending    <------>     branch: wt/ui-login
+# |   worktree: "ui-login"       |   task_id: 2             |
+# +------------------+                +------------------------+
+#                                     |
+#                           index.json (worktree registry)
+#                           events.jsonl (lifecycle log)
+
+# State machines:
+#   Task:     pending -> in_progress -> completed
+#   Worktree: absent  -> active      -> removed | kept
+
+# 用 git worktree 把“任务并发”从逻辑层提升到文件系统层隔离，从而解决多 Agent 同时修改代码导致的状态污染问题。
+
+Git worktree 的本质是：
+
+一个 repo，可以同时 checkout 多个分支到不同目录
+
+所以你得到：
+
+同一个 repo 历史
+多个独立工作目录
+完全隔离的 file state
+
+
+
+生命周期状态机
+
+任务状态：
+
+pending → in_progress → completed
+
+对应行为：
+
+pending
+还没分配 worktree
+in_progress
+创建 worktree
+checkout 分支
+Agent 在该目录工作
+completed
+merge / cleanup worktree
+
+从：
+
+❌ “单 workspace 多 agent”
+升级为
+✅ “多 workspace 多 agent”
+
+带来的变化：
+
+（1）彻底避免文件冲突
+
+每个 agent 改自己的 config.py，互不影响
+
+（2）可以真正并行
+
+N 个任务 = N 个目录 = N 个 git state
+
+（3）可以安全 rollback
+
+删掉 worktree 就等于丢弃整个任务状态
+
+（4）任务级 isolation（很关键）
+
+一个 task 就像一个 mini-repo session
+
+
+这其实是在做：
+
+把 agent system 从 “process-based concurrency”
+升级成 “filesystem-isolated execution”
+
+类似于：
+
+Docker（容器隔离）
+Sandbox
+CI job workspace
+
+只是你用的是：
+
+Git worktree 作为轻量级隔离层
+
+
 
 import json
 import os
+import re
+from sched import Event
 import subprocess
-import threading
 import time
-import uuid
 from pathlib import Path
 
 from anthropic import Anthropic
@@ -59,335 +157,233 @@ if os.getenv("ANTHROPIC_BASE_URL"):
 WORKDIR = Path.cwd()
 client = Anthropic(base_url=os.getenv("ANTHROPIC_BASE_URL"), api_key=os.getenv("ANTHROPIC_API_KEY"))
 MODEL = os.environ["MODEL_ID"]
-TEAM_DIR = WORKDIR / ".team"
-INBOX_DIR = TEAM_DIR / "inbox"
-TASK_DIR = WORKDIR / ".tasks"
-
-POLL_INTERVAL = 5
-IDLE_TIMEOUT = 60
-
-SYSTEM = f"You are a team lead at {WORKDIR}. Teammates are autonomous -- they find work themselves."
-
-VALID_MSG_TYPES = {
-    "message",
-    "broadcast",
-    "shutdown_request",
-    "shutdown_response",
-    "plan_approval_response",
-}
-
-# -- Request trackers --
-shutdown_requests = {}
-plan_requests = {}
-_tracker_lock = threading.Lock()
-_claim_lock = threading.Lock()
 
 
-# -- MessageBus: JSONL inbox per teammate --
-class MessageBus:
-    def __init__(self, inbox_dir: Path):
-        self.dir = inbox_dir
-        self.dir.mkdir(parents=True, exist_ok=True)
-
-    def send(self, sender: str, to: str, content: str,
-             msg_type: str = "message", extra: dict = None) -> str:
-        if msg_type not in VALID_MSG_TYPES:
-            return f"Error: Invalid type '{msg_type}'. Valid: {VALID_MSG_TYPES}"
-        msg = {
-            "type": msg_type,
-            "from": sender,
-            "content": content,
-            "timestamp": time.time(),
-        }
-        if extra:
-            msg.update(extra)
-        inbox_path = self.dir / f"{to}.jsonl"
-        with open(inbox_path, "a") as f:
-            f.write(json.dumps(msg) + "\n")
-        return f"Sent {msg_type} to {to}"
-
-    def read_inbox(self, name: str) -> list:
-        inbox_path = self.dir / f"{name}.jsonl"
-        if not inbox_path.exists():
-            return []
-        messages = []
-        for line in inbox_path.read_text().strip().splitlines():
-            if line:
-                messages.append(json.loads(line))
-            inbox_path.write_text("")  # 清空文件内容
-            return messages
-
-    def broadcast(self, sender: str, content: str, teammates: list) -> str:
-        count = 0
-        for name in teammates:
-            if name != sender:
-                self.send(sender, name, content, "broadcast")
-                count += 1
-        return f"Broadcast to {count} teammates"
-
-
-BUS = MessageBus(INBOX_DIR)
-
-
-# -- Task board scanning --
-def scan_unclaimed_tasks() -> list:
-    #  扫描所有还没人接的任务
-    TASK_DIR.mkdir(exist_ok=True)
-    unclaimed = []
-    for f in sorted(TASK_DIR.glob("task_*.json")):
-        task = json.loads(f.read_text())
-        if (task.get("status") == "pending"  # 任务未开始
-                and not task.get("owner")  # 无人负责
-                and not task.get("blockedBy")):  # 没有依赖任务
-            unclaimed.append(task)
-    return unclaimed
-
-def claim_task(task_id: int, owner: str) -> str:
-    # 执行抢任务
-    with _claim_lock:  # 加锁
-        path = TASK_DIR / f"task_{task_id}.json"  # 找任务文件
-        if not path.exists():
-            return f"Error: Task {task_id} not found"
-        task = json.loads(path.read_text())  # 读取
-        if task.get("owner"):  # 已经有人领了
-            existing_owner = task.get("owner") or "someone else"
-            return f"Error: Task {task_id} has already been claimed by {existing_owner}"
-        if task.get("status") != "pending":  # 检查状态
-            status = task.get("status")
-            return f"Error: Task {task_id} cannot be claimed because its status is '{status}'"
-        if task.get("blockedBy"):  # 检查依赖
-            return f"Error: Task {task_id} is blocked by other task(s) and cannot be claimed yet"
-        task["owner"] = owner  # 领取
-        task["status"] = "in_progress"  # 状态
-        path.write_text(json.dumps(task, indent=2))  # 更新写回
-    return f"Claimed task #{task_id} for {owner}"
-
-
-# -- Identity re-injection after compression --
-def make_identity_block(name: str, role: str, team_name: str) -> dict:
-    # 身份重注入（Identity Re-injection）机制，防止压缩后模型忘记身份
-    return {
-        "role": "user",  # 通常不允许在对话过程中动态插入新的 system message，用 user 模拟一个高优先级提醒
-        "content": f"<identity>You are '{name}', role: {role}, team: {team_name}. Continue your work.</identity>",
-    }  # <identity> 标签 让模型更容易识别该信息
-
-
-# -- Autonomous TeammateManager --
-class TeammatedManager:
-    def __init__(self, team_dir: Path):
-        self.dir = team_dir
-        self.dir.mkdir(exist_ok=True)
-        self.config_path = self.dir / "config.json"
-        self.config = self._load_config()
-        self.threads = {}
-
-    def _load_config(self) -> dict:
-        if self.config_path.exists():
-            return json.loads(self.config_path.read_text())
-        return {"team_name": "default", "members": []}
-
-    def _save_config(self):
-        self.config_path.write_text(json.dumps(self.config, indent=2))
-
-    def _find_member(self, name: str) -> dict:
-        for m in self.config["members"]:
-            if m["name"] == name:
-                return m
+def detect_repo_root(cwd: Path) -> Path | None:
+    """Return git repo root if cwd is inside a repo, else None."""
+    # 用 git rev-parse --show-toplevel 判断当前目录是否属于 git 仓库，并返回仓库根目录；失败则返回 None。
+    try:
+        r = subprocess.run(
+            ["git", "rev-parse", "--show-toplevel"],
+            cwd = cwd,
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+        if r.returncode != 0:
+            return None
+        root = Path(r.stdout.strip())
+        return root if root.exists() else None
+    except Exception:
         return None
 
-    def _set_status(self, name: str, status: str):
-        member = self._find_member(name)
-        if member:
-            member["status"] = status
-            self._save_config()
+    # repo 即 Git 仓库（git repository）
+    # repo = 一个项目文件夹 + 版本历史记录
+    # 比如一个典型 repo：
 
-    def spawn(self, name: str, role: str, prompt: str) -> str:
-        member = self._find_member(name)
-        if member:
-            if member["status"] not in ("idle", "shutdown"):
-                return f"Error: '{name}' is currently {member['status']}"
-            member["status"] = "working"
-            member["role"] = role
-        else:
-            member = {"name": name, "role": role, "status": "working"}
-            self.config["members"].append(member)
-        self._save_config()
-        thread = threading.Thread(
-            target=self._loop,  # 第一次试的时候报错，agent自动改了这里耶
-            args=(name, role, prompt),
-            daemon=True,
-        )
-        self.threads[name] = thread
-        thread.start()
-        return f"Spawned '{name}' (role: {role})"
+    # my_project/
+    # .git/          ← 版本历史（关键）
+    # src/
+    # README.md
+
+    # 这个整个 my_project 文件夹，就叫一个 repo
+    # repo root 即 这个 git 仓库的最顶层目录
+
+    # repo = 共享代码空间的“母体”
+    # 每个 task → 一个 worktree（子工作区）
+    # 所有 worktree → 都基于同一个 repo
+
+    # repo (主仓库)
+    # ├── worktree A (task 1)
+    # ├── worktree B (task 2)
 
 
-    def _loop(self, name: str, role: str, prompt: str):
-        # 队友循环分两个阶段: WORK 和 IDLE。LLM 停止调用工具 (或调用了 idle) 时, 进入 IDLE。
-        team_name = self.config["team_name"]
-        sys_prompt = (
-            f"You are '{name}', role: {role}, team: {team_name}, at {WORKDIR}."
-            f"Use idle tool when you have no more work. You will auto-claim new tasks."
-        )
-        messages = [{"role": "user", "content": prompt}]
-        tools = self._teammate_tools()
+REPO_ROOT = detect_repo_root(WORKDIR) or WORKDIR
 
-        while True:
-            # -- WORK PHASE: standard agent loop --
-            for _ in range(50):
-                inbox = BUS.read_inbox(name)
-                for msg in inbox:
-                    if msg.get("type") == "shutdown_request":
-                        self._set_status(name, "shutdown")  # 关闭
-                        return
-                    messages.append({"role": "user", "content": json.dumps(msg)})
-                try:
-                    response = client.messages.create(
-                        model=MODEL,
-                        system=sys_prompt,
-                        messages=messages,
-                        tools=tools,
-                        max_tokens=8000,
-                    )
-                except Exception:
-                    self._set_status(name, "idle")  # 空闲
-                    return
-                messages.append({"role": "assistant", "content": response.content})
-                if response.stop_reason != "tool_use":
-                    break
-                results = []
-                for block in response.content:
-                    if block.type == "tool_use":
-                        if block.name == "idle":
-                            idle_requested = True
-                            output = "Entering idle phase. Will poll for new tasks."
-                        else:
-                            output = self._exec(name, block.name, block.input)
-                        print(f"  [{name}] {block.name}: {str(output)[:120]}")
-                        results.append({
-                            "type": "tool_result",
-                            "tool_use_id": block.id,
-                            "content": str(output),
-                        })
-                messages.append({"role": "user", "content": results})
-                if idle_requested:
-                    break
+SYSTEM = (
+    f"You are a coding agent at {WORKDIR}. "
+    "Use task + worktree tools for multi-task work. "
+    "run commands in those lanes, then choose keep/remove for closeout. "
+    "Use worktree_events when you need lifecycle visibility."
+)
 
-            # -- IDLE PHASE: poll for inbox messages and unclaimed tasks --
-            self._set_status(name, "idle")
-            resume = False  # 是否从待机状态恢复成工作状
-            polls = IDLE_TIMEOUT // max(POLL_INTERVAL, 1)
-            for _ in range(polls):
-                time.sleep(POLL_INTERVAL)
-                # 空闲阶段循环轮询收件箱
-                inbox = BUS.read_inbox(name)
-                if inbox:
-                    for msg in inbox:
-                        if msg.get("type") == "shutdown_request":
-                            self._set_status(name, "shutdown")
-                            return
-                        messages.append({"role": "user", "content": json.dumps(msg)})
-                    resume = True
-                    break
-                unclaimed = scan_unclaimed_tasks()  # 空闲阶段循环轮询任务看板
-                if unclaimed:
-                    task = unclaimed[0]
-                    result = claim_task(task["id"], name)
-                    if result.startswith("Error:"):
-                        continue
-                    task_prompt = (
-                        f"<auto-claimed>Task #{task['id']}: {task['subject']}\n"
-                        f"{task.get('description', '')}</auto-claimed>"
-                    )
-                    if len(messages) <= 3:
-                    # 身份重注入: 上下文过短 (说明发生了压缩) 时, 在开头插入身份块。
-                        messages.insert(0, make_identity_block(name, role, team_name))
-                        messages.insert(1, {"role": "assistant", "content":  f"I am {name}. Continuing."})
-                    messages.append({"role": "user", "content": task_prompt})
-                    messages.append({"role": "assistant", "content": f"Claimed task #{task['id']}. Working on it."})
-                    resume = True
-                    break
-            
-            if not resume:
-                self._set_status(name, "shutdown")
-                return
-            self._set_status(name, "working")
 
-    def _exec(self, sender: str, tool_name: str, args: dict) -> str:
-        if tool_name == "bash":
-            return _run_bash(args["command"])
-        if tool_name == "read_file":
-            return _run_read(args["path"])
-        if tool_name == "write_file":
-            return _run_write(args["path"], args["content"])
-        if tool_name == "edit_file":
-            return _run_edit(args["path"], args["old_text"], args["new_text"])
-        if tool_name == "send_message":
-            return BUS.send(sender, args["to"], args["content"], args.get("msg_type", "message"))
-        if tool_name == "read_inbox":
-            return json.dumps(BUS.read_inbox(sender), indent=2)
+# -- EventBus: append-only lifecycle events for observability --
+class EventBus:
+    def __init__(self, event_log_path: Path):
+        self.path = event_log_path
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        if not self.path.exists():
+            self.path.write_text("")
+        
+    def emit(
+        self,
+        event: str,
+        task: dict | None = None,
+        worktree: dict | None = None,
+        error: str | None = None,
+    ):
+        pass
 
-        if tool_name == "shutdown_response":
-            req_id = args["request_id"]
-            approve = args["approve"]
-            with _tracker_lock:
-                if req_id in shutdown_requests:
-                    shutdown_requests[req_id]["status"] = "approved" if approve else "rejected"
-            BUS.send(
-                sender, "lead", args.get("reason", ""),
-                "shutdown_response", {"request_id": req_id, "approve": approve},
-            )
-            return f"Shutdown {'approved' if approve else 'rejected'}"
+    def list_recent(self, limit: int = 20) -> str:
+        pass
 
-        if tool_name == "plan_approval":
-            plan_text = args.get("paln", "")
-            req_id = str(uuid.uuid4())[:8]
-            with _tracker_lock:
-                plan_requests[req_id] = {"from": sender, "plan": plan_text, "status": "pending"}
-            BUS.send(
-                sender, "lead", plan_text, "plan_approval_response",
-                {"request_id": req_id, "plan": plan_text},
-            )
-            return f"Plan submitted (request_id={req_id}). Waiting for lead approval."
-        return f"Unknow tool: {tool_name}"
 
-    def _teammate_tools(self) -> list:
-        return [
-            {"name": "bash", "description": "Run a shell command.",
-             "input_schema": {"type": "object", "properties": {"command": {"type": "string"}}, "required": ["command"]}},
-            {"name": "read_file", "description": "Read file contents.",
-             "input_schema": {"type": "object", "properties": {"path": {"type": "string"}}, "required": ["path"]}},
-            {"name": "write_file", "description": "Write content to file.",
-             "input_schema": {"type": "object", "properties": {"path": {"type": "string"}, "content": {"type": "string"}}, "required": ["path", "content"]}},
-            {"name": "edit_file", "description": "Replace exact text in file.",
-             "input_schema": {"type": "object", "properties": {"path": {"type": "string"}, "old_text": {"type": "string"}, "new_text": {"type": "string"}}, "required": ["path", "old_text", "new_text"]}},
-            {"name": "send_message", "description": "Send message to a teammate.",
-             "input_schema": {"type": "object", "properties": {"to": {"type": "string"}, "content": {"type": "string"}, "msg_type": {"type": "string", "enum": list(VALID_MSG_TYPES)}, "required": ["to", "content"]}}},  # enum即只能从指定列表中选择
-            {"name": "read_inbox", "description": "Read and drain your inbox.",
-             "input_schema": {"type": "object", "properties": {}}},
-            {"name": "shutdown_response", "description": "Respond to a shutdown request. Approve to shut down, reject to keep working.",
-             "input_schema": {"type": "object", "properties": {"request_id": {"type": "string"}, "approve": {"type": "boolean"}, "reason": {"type": "string"}}, "required": ["request_id", "approve"]}},
-            {"name": "plan_approval", "description": "Submit a plan for lead approval. Provide plan text.",
-             "input_schema": {"type": "object", "properties": {"plan": {"type": "string"}}, "required": ["plan"]}},
-             {"name": "idle", "description": "Signal that you have no more work. Enters idle polling phase.",
-             "input_schema": {"type": "object", "properties": {}}},
-            {"name": "claim_task", "description": "Claim a task from the task board by ID.",
-             "input_schema": {"type": "object", "properties": {"task_id": {"type": "integer"}}, "required": ["task_id"]}},
-        ]
+
+# -- TaskManager: persistent task board with optional worktree binding --
+class TaskManager:
+    def __init__(self, task_dir: Path):
+        self.dir = task_dir
+        self.dir.mkdir(parents=True, exist_ok=True)
+        self._next_id = self._max_id() + 1
+
+    def _max_id(self) -> int:
+        ids = []
+        for f in self.dir.glob("task_*.json"):
+            try:
+                ids.append(int(f.stem.split("_")[1]))
+            except Exception:
+                pass
+        return max(ids) if ids else 0
+
+    def _path(self, task_id: int) -> Path:
+        return self.dir / f"task_{task_id}.json"
+
+    def _load(self, task_id: int) -> dict:
+        path = self._path(task_id)
+        if not path.exists():
+            raise ValueError(f"Task {task_id} not found")
+        return json.loads(path.read_text())
+
+    def _save(self, task: dict):
+        self._path(task["id"]).write_text(json.dumps(task, indent=2))
+
+    def create(self, subject: str, description: str = "") -> str:
+        pass
+
+    def get(self, task_id: int) -> str:
+        pass
+
+    def exists(self, task_id: int) -> bool:
+        pass
+
+    def update(self, task_id: int, status: str = None, owner: str = None) -> str:
+        pass
+
+    def bind_worktree(self, task_id: int, worktree: str, owner: str = "") -> str:
+        pass
+
+    def unbind_worktree(self, task_id:; int) -> str:
+        pass
 
     def list_all(self) -> str:
-        if not self.config["members"]:
-            return "No teammates."
-        lines = [f"Team: {self.config['team_name']}"]
-        for m in self.config["members"]:
-            lines.append(f" {m['name']} ({m['role']}): {m['status']}")
-        return "\n".join(lines)
-
-    def member_names(self) -> list:
-        return [m["name"] for m in self.config["members"]]
+        pass
 
 
-TEAM = TeammatedManager(TEAM_DIR)
+
+
+TASKS = TaskManager(REPO_ROOT / ".tasks")
+EVENTS = EventBus(REPO_ROOT / ".worktrees" / "events.jsonl")
+
+
+
+# -- WorktreeManager: create/list/run/remove git worktrees + lifecycle index --
+class WorktreeManager:
+    def __init__(self, repo_root: Path, tasks: TaskManager, events: EventBus):
+        self.repo_root = repo_root
+        self.tasks = tasks
+        self.events = events
+        self.dir = repo_root / ".worktrees"
+        self.dir.mkdir(parents=True, exist_ok=True)
+        self.index_path = self.dir / "index.json"
+        if not self.index_path.exists():
+            self.index_path.write_text(json.dumps({"worktrees": []}, indent=2))
+        self.git_available = self._is_git_repo()
+
+    def _is_git_repo(self) -> bool:
+        try:
+            r = subprocess.run(
+                ["git", "rev-parse", "--is-inside-work-tree"],
+                cwd=self.repo_root,
+                capture_output=True,
+                text=True,
+                timeout=10,
+            )
+            return r.returncode == 0
+        except Exception:
+            return False
+
+    def run_git(self, args: list[str]) -> str:
+        if not self.git_available:
+            raise RuntimeError("Not in a git repository. worktree tools require git.")
+        r = subprocess.run(
+            ["git", *args],
+            cwd=self.repo_root,
+            capture_output=True,
+            text=True,
+            timeout=120,
+        )
+        if r.returncode != 0:
+            msg = (r.stdout + r.stderr).strip()
+            raise RuntimeError(msg or f"git {' '.join(args)} failed")
+        return (r.stdout + r.stderr).strip() or "(no output)"
+
+    def _load_index(self) -> dict:
+        return json.loads(self.index_path.read_text())
+
+    def _save_index(self, data: dict):
+        self.index_path.write_text(json.dumps(data, indent=2))
+
+    def _find(self, name: str) -> dict | None:
+        idx = self._load_index()
+        for wt in idx.get("worktrees", []):
+            if wt.get("name") == name:
+                return wt
+        return None
+
+    def _validate_name(self, name: str):
+        if not re.fullmatch(r"[A-Za-z0-9._-]{1,40}", name or ""):
+            raise ValueError(
+                "Invalid worktree name. Use 1-40 chars: letters, numbers, ., _, -"
+            )
+
+    def create(self, name: str, task_id: int = None, base_ref: str = "HEAD") -> str:
+        self._validate_name(name)
+        if self._find(name):
+            raise ValueError(f"Worktree '{name}' already exists in index")
+        if task_id is not None and not self.tasks.exists(task_id):
+            raise ValueError(f"Task {task_id} not found")
+
+        path = self.dir / name
+        branch = f"wt/{name}"
+        self.events.emit(
+            "worktree.create.before",
+            task={"id": task_id} if task_id is not None else {},
+            worktree={"name": name, "base_ref": base_ref},
+        )
+
+
+
+
+
+    def list_all(self) -> str:
+        pass
+
+    def status(self, name: str) -> str:
+        pass
+
+    def run(self, name: str, command: str) -> str:
+        pass
+
+    def remove(self, name: str, force: bool = False, complete_task: bool = False) -> str:
+        pass
+
+    def keep(self, name: str) -> str:
+        pass
+
+
+WORKTREES = WorktreeManager(REPO_ROOT, TASKS, EVENTS)
+
 
 
 # -- Base tool implementations --
@@ -398,7 +394,7 @@ def _safe_path(p: str) -> Path:
     return path
 
 def _run_bash(command: str) -> str:
-    dangerous = ["rm -rf /", "sudo", "shutdown", "reboot"]
+    dangerous = ["rm -rf /", "sudo", "shutdown", "reboot", "> /dev/"]
     if any(d in command for d in dangerous):
         return "Error: Dangerous command blocked"
     try:
@@ -437,34 +433,6 @@ def _run_edit(path: str, old_text: str, new_text: str) -> str:
         return f"Edited {path}"
     except Exception as e:
         return f"Error: {e}"
-
-# -- Lead-specific protocol handlers --
-def handle_shutdown_request(teammate: str) -> str:
-    req_id = str(uuid.uuid4())[:8]
-    with _tracker_lock:
-        shutdown_requests[req_id] = {"target": teammate, "status": "pending"}
-    BUS.send(
-        "lead", teammate, "Please shut down gracefully.",
-        "shutdown_request", {"request_id": req_id},
-    )
-    return f"Shutdown request {req_id} sent to '{teammate}' (status: pending)"
-
-def handle_plan_review(request_id: str, approve: bool, feedback: str = "") -> str:
-    with _tracker_lock:
-        req = plan_requests.get(request_id)
-    if not req:
-        return f"Error: Unknown plan request_id '{request_id}'"
-    with _tracker_lock:
-        req["status"] = "approved" if approve else "rejected"
-    BUS.send(
-        "lead", req["from"], feedback, "plan_approval_response",
-        {"request_id": request_id, "approve": approve, "feedback": feedback},
-    )
-    return f"Plan {req['status']} for '{req['from']}'"
-
-def _check_shutdown_status(request_id: str) -> str:
-    with _tracker_lock:
-        return json.dumps(shutdown_requests.get(request_id, {"error": "not found"}))
 
 
 # -- Lead tool dispatch (12 tools) --

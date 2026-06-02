@@ -1,8 +1,8 @@
 {
   "id": 2,
-  "subject": "Write code",
-  "description": "Implement the core functionality",
-  "status": "pending",
-  "blockedBy": [],
-  "owner": ""
+  "subject": "Add unit tests for greet.py",
+  "description": "Create a test file test_greet.py that covers the main functions in greet.py with proper assertions.",
+  "status": "in_progress",
+  "owner": "lead",
+  "blockedBy": null
 }

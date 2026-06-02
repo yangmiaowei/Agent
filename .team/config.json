@@ -3,12 +3,32 @@
   "members": [
     {
       "name": "alice",
-      "role": "coder",
-      "status": "idle"
+      "role": "frontend",
+      "status": "working"
     },
     {
       "name": "bob",
-      "role": "tester",
+      "role": "backend",
+      "status": "working"
+    },
+    {
+      "name": "alice2",
+      "role": "engineer",
+      "status": "idle"
+    },
+    {
+      "name": "bob2",
+      "role": "engineer",
+      "status": "idle"
+    },
+    {
+      "name": "carol",
+      "role": "engineer",
+      "status": "idle"
+    },
+    {
+      "name": "dave",
+      "role": "engineer",
       "status": "idle"
     }
   ]
