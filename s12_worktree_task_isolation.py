@@ -361,13 +361,47 @@ class WorktreeManager:
             task={"id": task_id} if task_id is not None else {},
             worktree={"name": name, "base_ref": base_ref},
         )
+        try:
+            self._run_git(["worktree", "add", "-b", branch, str(path), base_ref])
 
+            entry = {
+                "name": name,
+                "path": str(path),
+                "branch": branch,
+                "task_id": task_id,
+                "status": "active",
+                "created_at": time.time(),
+            }
 
+            idx = self._load_index()
+            idx["worktrees"].append(entry)
+            self._save_index(idx)
 
+            if task_id is not None:
+                self.tasks.bind_worktree(task_id, name)
 
+            self.events.emit(
+                "worktree.create.after",
+                task={"id": task_id} if task_id is not None else {},
+                worktree={
+                    "name": name,
+                    "path": str(path),
+                    "branch": branch,
+                    "status": "active",
+                }
+            )
+            return json.dumps(entry, indent=2)
+        except Exception as e:
+            self.events.emit(
+                "worktree.create.failed",
+                task={"id": task_id} if task_id is not None else {},
+                worktree={"name": name, "base_ref": base_ref},
+                error=str(e),
+            )
+            raise
 
     def list_all(self) -> str:
-        pass
+        idx = self._load_index()
 
     def status(self, name: str) -> str:
         pass
