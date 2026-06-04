@@ -1,0 +1,11 @@
+TOOLS = [{
+    "name": "bash",
+    "description": "Run a shell command.",
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "command": {"type": "string"}
+        },
+        "required": ["command"]
+    }
+}]
