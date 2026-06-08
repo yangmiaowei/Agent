@@ -1,2 +1,5 @@
-import os
-SYSTEM_PROMPT = f"You are a coding agent at {os.getcwd()}. Use bash to solve tasks. Act, don't explain."
+from pathlib import Path
+
+WORKDIR = Path.cwd()
+
+SYSTEM_PROMPT =  f"You are a coding agent at {WORKDIR}. Use tools to solve tasks. Act, don't explain."

@@ -1,4 +1,7 @@
-from runtime.baseloop import agent_loop
+from src.runtime.baseloop import agent_loop
+from src.tools.tool_loader import load_all_tools
+
+load_all_tools()
 
 # 修复 macOS 终端里 Python 输入中文 / 特殊字符 / 退格键异常的问题
 try:
@@ -26,13 +29,11 @@ if __name__ == "__main__":
         agent_loop.loop(history)
 
         print("\n===== FULL MESSAGES DEBUG =====")
-        for i, m in enumerate(history):
-            print(f"\n--- message {i} ---")
-            print(m)
 
         response_content = history[-1]["content"]
         if isinstance(response_content, list):
             for block in response_content:
-                if hasattr(block, "text"):
-                    print(block.text)
+                print(block)
+                # if hasattr(block, "text"):
+                #     print(block.text)
         print()

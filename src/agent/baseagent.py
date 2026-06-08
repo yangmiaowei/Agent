@@ -1,4 +1,4 @@
-from model.AnthropicClient import client
+from src.model.AnthropicClient import client
 
 
 class BaseAgent:

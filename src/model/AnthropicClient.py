@@ -15,9 +15,8 @@ ANTHROPIC_BASE_URL = os.getenv("ANTHROPIC_BASE_URL")
 ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY")
 MODEL = os.getenv("MODEL")
 
-from prompts.system_prompt import SYSTEM_PROMPT
-from tools.tools import TOOLS
-
+from src.prompts.system_prompt import SYSTEM_PROMPT
+from src.tools.tool_manager import tool_manager
 
 class AnthropicClient:
     def __init__(self, api_key: str = ANTHROPIC_API_KEY, base_url: str = ANTHROPIC_BASE_URL, model: str = MODEL):
@@ -25,13 +24,16 @@ class AnthropicClient:
         self.model = model
 
     def chat(self, messages: List[Dict[str, str]], max_tokens: int = 8000) -> str:
+        tools = tool_manager.list_tools()
+        print("Tools:", tools)
         response = self.client.messages.create(
             model=self.model,
             system=SYSTEM_PROMPT,
             messages=messages,
-            tools=TOOLS,
+            tools=tool_manager.list_tools(),
             max_tokens=max_tokens
         )
+        print(response)
         return response
 
 client = AnthropicClient()
