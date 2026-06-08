@@ -11,7 +11,6 @@ try:
     readline.parse_and_bind('set input-meta on')
     readline.parse_and_bind('set output-meta on')
     readline.parse_and_bind('set convert-meta off')
-    readline.parse_and_bind('set enable-meta-keybindings on')
 except ImportError:
     pass
 

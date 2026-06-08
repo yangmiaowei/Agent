@@ -3,7 +3,7 @@ from src.tools.tool_manager import tool
 
 @tool
 class EditFile(BaseTool):
-    name = "read_file"
+    name = "edit_file"
     description = "Replace exact text in file."
     input_schema = {
         "type": "object", 
