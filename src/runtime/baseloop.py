@@ -1,5 +1,6 @@
-from src.agent.baseagent import agent
-from src.tools.tool_manager import ToolManager, tool_manager
+from src.tools.tool_manager import ToolManager
+from src.logger.logger import log_message
+
 
 class BaseLoop:
     def __init__(self, agent, tools: ToolManager, memory=None):
@@ -7,12 +8,16 @@ class BaseLoop:
         self.tools = tools
         self.memory = memory
 
-    def loop(self, messages: list):
+    def loop(self, messages: list, logger=None):
         while True:
-            response = self.agent.run(messages)
-            messages.append({"role": "assistant", "content": response.content})
-            
-            # If the model didn't call a tool, we're done
+            response = self.agent.run(messages, tools=self.tools)
+            assistant_msg = {
+                "role": "assistant",
+                "content": [block.model_dump() for block in response.content],
+            }
+            messages.append(assistant_msg)
+            log_message(logger, assistant_msg)
+
             if response.stop_reason != "tool_use":
                 return
 
@@ -25,7 +30,6 @@ class BaseLoop:
                         "tool_use_id": block.id,
                         "content": output
                     })
-            messages.append({"role": "user", "content": results})
-
-
-agent_loop = BaseLoop(agent, tools=tool_manager)
+            user_msg = {"role": "user", "content": results}
+            messages.append(user_msg)
+            log_message(logger, user_msg)

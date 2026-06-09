@@ -1,8 +1,18 @@
-from src.runtime.baseloop import agent_loop
+from src.tools.tool_manager import ToolManager
 from src.tools.tool_loader import load_all_tools
-from src.logger.logger import logger
+from src.model.AnthropicClient import AnthropicClient
+from src.agent.baseagent import BaseAgent
+from src.runtime.baseloop import BaseLoop
+from src.logger.logger import JsonLogger, log_message
 
-load_all_tools()
+logger = JsonLogger()
+
+tool_manager = ToolManager()
+load_all_tools(tool_manager)
+
+client = AnthropicClient(tools=tool_manager)
+agent = BaseAgent(client=client)
+agent_loop = BaseLoop(agent=agent, tools=tool_manager)
 
 # 修复 macOS 终端里 Python 输入中文 / 特殊字符 / 退格键异常的问题
 try:
@@ -25,15 +35,7 @@ if __name__ == "__main__":
         if query.strip().lower() in ("q", "exit", ""):
             break
 
-        history.append({"role": "user", "content": query})
-        agent_loop.loop(history)
-
-        for msg in history:
-            role = msg["role"]
-            content = msg["content"]
-
-            if isinstance(content, list):
-                for block in content:
-                    logger.log({"role": role, "content": block})
-            else:
-                logger.log({"role": role, "content": content})
+        user_msg = {"role": "user", "content": query}
+        history.append(user_msg)
+        log_message(logger, user_msg)
+        agent_loop.loop(history, logger=logger)

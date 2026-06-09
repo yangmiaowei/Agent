@@ -1,7 +1,6 @@
-import pkgutil
-import importlib
-import src.tools
+from src.bootstrap import init_tools
+from src.tools.tool_manager import ToolManager
 
-def load_all_tools():
-    for _, module_name, _ in pkgutil.iter_modules(src.tools.__path__):
-        importlib.import_module(f"src.tools.{module_name}")
+
+def load_all_tools(tool_manager: ToolManager):
+    init_tools(tool_manager)

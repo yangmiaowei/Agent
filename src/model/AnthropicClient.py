@@ -16,27 +16,33 @@ ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY")
 MODEL = os.getenv("MODEL")
 
 from src.prompts.system_prompt import SYSTEM_PROMPT
-from src.tools.tool_manager import tool_manager
+from src.tools.tool_manager import ToolManager
 
 class AnthropicClient:
-    def __init__(self, api_key: str = ANTHROPIC_API_KEY, base_url: str = ANTHROPIC_BASE_URL, model: str = MODEL):
+    def __init__(
+        self,
+        tools: ToolManager,
+        api_key: str = ANTHROPIC_API_KEY,
+        base_url: str = ANTHROPIC_BASE_URL,
+        model: str = MODEL,
+    ):
+        self.tools = tools
         self.client = Anthropic(api_key=api_key, base_url=base_url)
         self.model = model
 
-    def chat(self, messages: List[Dict[str, str]], max_tokens: int = 8000) -> str:
-        tools = tool_manager.list_tools()
-        print("Tools:", tools)
+    def chat(self, messages: List[Dict[str, str]], max_tokens: int = 8000, tools: ToolManager = None) -> str:
+        manager = tools or self.tools
+        tool_schemas = manager.list_tools()
+        # print("Tools:", tool_schemas)
         response = self.client.messages.create(
             model=self.model,
             system=SYSTEM_PROMPT,
             messages=messages,
-            tools=tool_manager.list_tools(),
+            tools=tool_schemas,
             max_tokens=max_tokens
         )
-        print(response)
+        # print(response)
         return response
-
-client = AnthropicClient()
 
 # messages = [{"role": "user", "content": "Create a file called greet.py with a greet(name) function"}]
 # response = client.messages.create(

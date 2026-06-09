@@ -2,7 +2,7 @@ import uuid
 import time
 import copy
 import traceback
-from logger.logger import JsonLogger
+from src.logger.logger import JsonLogger
 
 
 class ToolManager:
@@ -123,14 +123,3 @@ class ToolManager:
             }
             for t in self._tools.values()
         ]
-
-
-tool_manager = ToolManager()
-
-from bootstrap import init_tools
-init_tools(tool_manager)
-
-# 初始化顺序不可控，多实例冲突等问题
-# def tool(cls):
-#     tool_manager.register(cls)
-#     return cls
