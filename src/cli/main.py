@@ -2,7 +2,8 @@ from src.tools.tool_manager import ToolManager
 from src.tools.tool_loader import load_all_tools
 from src.model.AnthropicClient import AnthropicClient
 from src.agent.baseagent import BaseAgent
-from src.runtime.baseloop import BaseLoop
+from src.runtime.base_loop import BaseLoop
+from src.policies.todo_reminder_policy import TodoReminderPolicy
 from src.logger.logger import JsonLogger, log_message
 
 logger = JsonLogger()
@@ -12,7 +13,7 @@ load_all_tools(tool_manager)
 
 client = AnthropicClient(tools=tool_manager)
 agent = BaseAgent(client=client)
-agent_loop = BaseLoop(agent=agent, tools=tool_manager)
+agent_loop = BaseLoop(agent=agent, tools=tool_manager, policies=[TodoReminderPolicy()])
 
 # 修复 macOS 终端里 Python 输入中文 / 特殊字符 / 退格键异常的问题
 try:
