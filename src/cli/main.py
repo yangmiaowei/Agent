@@ -1,5 +1,6 @@
 from src.runtime.baseloop import agent_loop
 from src.tools.tool_loader import load_all_tools
+from src.logger.logger import logger
 
 load_all_tools()
 
@@ -27,12 +28,12 @@ if __name__ == "__main__":
         history.append({"role": "user", "content": query})
         agent_loop.loop(history)
 
-        print("\n===== FULL MESSAGES DEBUG =====")
+        for msg in history:
+            role = msg["role"]
+            content = msg["content"]
 
-        response_content = history[-1]["content"]
-        if isinstance(response_content, list):
-            for block in response_content:
-                print(block)
-                # if hasattr(block, "text"):
-                #     print(block.text)
-        print()
+            if isinstance(content, list):
+                for block in content:
+                    logger.log({"role": role, "content": block})
+            else:
+                logger.log({"role": role, "content": content})

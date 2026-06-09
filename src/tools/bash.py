@@ -1,9 +1,8 @@
 import os
 import subprocess
 from src.tools.base_tool import BaseTool
-from src.tools.tool_manager import tool
 
-@tool
+
 class Bash(BaseTool):
     name = "bash"
     description = "Run a shell command."

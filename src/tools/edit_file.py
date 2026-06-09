@@ -1,7 +1,6 @@
 from src.tools.base_tool import BaseTool, safe_path
-from src.tools.tool_manager import tool
 
-@tool
+
 class EditFile(BaseTool):
     name = "edit_file"
     description = "Replace exact text in file."

@@ -1,7 +1,6 @@
 from src.tools.base_tool import BaseTool, safe_path
-from src.tools.tool_manager import tool
 
-@tool
+
 class ReadFile(BaseTool):
     name = "read_file"
     description = "Read file contents."
