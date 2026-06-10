@@ -2,7 +2,7 @@ import abc
 from typing import Any, Dict
 from pathlib import Path
 
-WORKDIR = Path.cwd()
+from src.workspace import WORKDIR
 
 
 class BaseTool(abc.ABC):

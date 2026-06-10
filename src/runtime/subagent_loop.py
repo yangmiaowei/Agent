@@ -42,3 +42,12 @@ class SubAgentLoop:
             
          # Only the final text returns to the parent -- child context is discarded
         return "".join(b.text for b in response.content if hasattr(b, "text")) or "(no summary)"
+
+
+# 用户输入
+#   → BaseLoop（主 agent，6 个工具含 Task）
+#       → LLM 决定调用 task
+#           → Task.run(prompt=...)
+#               → SubAgentLoop（独立上下文，5 个工具，无 Task）
+#                   → subagent 自己跑工具、思考
+#               → 只把最终文字摘要返回给主 agent

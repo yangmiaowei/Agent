@@ -1,6 +1,8 @@
 import json
-from pathlib import Path
 from datetime import datetime
+from pathlib import Path
+
+from src.workspace import WORKDIR
 
 
 def _json_default(obj):
@@ -11,7 +13,7 @@ def _json_default(obj):
 
 class JsonLogger:
     def __init__(self, workdir=None):
-        self.workdir = Path(workdir) if workdir else Path.cwd() / "WORKDIR"
+        self.workdir = Path(workdir) if workdir else WORKDIR
         self.workdir.mkdir(parents=True, exist_ok=True)
 
         ts = datetime.now().strftime("%Y%m%d_%H%M%S")

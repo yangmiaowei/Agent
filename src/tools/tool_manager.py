@@ -49,6 +49,7 @@ class ToolManager:
     def register(self, tool_cls):
         """
         动态注册工具（运行时也可以调用）
+        register(cls) 只能无参构造 cls()，适合 Bash、ReadFile 这类无依赖工具。
         """
         instance = tool_cls()
         name = instance.name
@@ -58,6 +59,15 @@ class ToolManager:
 
         self._tools[name] = instance
         return tool_cls
+
+    def register_instance(self, tool):
+        """
+        Task 构造需要 subagent_loop 和 logger，所以用 register_instance() 注册已经构造好的实例。
+        这是让依赖注入能落地的最小接口。
+        """
+        if tool.name in self._tools:
+            raise ValueError(f"Tool conflict: {tool.name}")
+        self._tools[tool.name] = tool
 
     def call(self, name: str, args: dict):
         """

@@ -1,18 +1,8 @@
-from src.tools.tool_manager import ToolManager
-from src.tools.tool_loader import load_all_tools
-from src.model.AnthropicClient import AnthropicClient
-from src.agent.base_agent import BaseAgent
-from src.runtime.base_loop import BaseLoop
-from src.logger.logger import JsonLogger, log_message
+from src.setup import build_main_runtime
+from src.logger.logger import log_message
 
-logger = JsonLogger()
-
-tool_manager = ToolManager()
-load_all_tools(tool_manager)
-
-client = AnthropicClient(tools=tool_manager)
-agent = BaseAgent(client=client)
-agent_loop = BaseLoop(agent=agent, tools=tool_manager)
+# tools 定义能力，setup 组装一切，入口只调一个函数。
+agent_loop, logger = build_main_runtime()
 
 # 修复 macOS 终端里 Python 输入中文 / 特殊字符 / 退格键异常的问题
 try:
