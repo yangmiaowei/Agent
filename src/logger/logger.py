@@ -1,4 +1,6 @@
 import json
+from pathlib import Path
+from datetime import datetime
 
 
 def _json_default(obj):
@@ -8,12 +10,21 @@ def _json_default(obj):
 
 
 class JsonLogger:
-    def __init__(self, path="agent_log.jsonl"):
-        self.path = path
+    def __init__(self, workdir=None):
+        self.workdir = Path(workdir) if workdir else Path.cwd() / "WORKDIR"
+        self.workdir.mkdir(parents=True, exist_ok=True)
+
+        ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+        self.path = self.workdir / f"agent_log_{ts}.jsonl"
 
     def log(self, data):
+        record = {
+            "timestamp": datetime.now().isoformat(),
+            "data": data
+        }
+
         with open(self.path, "a", encoding="utf8") as f:
-            f.write(json.dumps(data, ensure_ascii=False, default=_json_default) + "\n")
+            f.write(json.dumps(record, ensure_ascii=False, default=_json_default) + "\n")
 
 
 def log_message(logger, msg):
