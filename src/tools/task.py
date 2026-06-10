@@ -1,5 +1,22 @@
 from src.tools.base_tool import BaseTool
 
+from src.tools.tool_manager import ToolManager
+from src.tools.tool_loader import load_subagent_tools
+from src.model.AnthropicClient import AnthropicClient
+from src.agent.base_agent import BaseAgent
+from src.runtime.subagent_loop import SubAgentLoop
+from src.logger.logger import JsonLogger
+from pathlib import Path
+
+subagent_logger = JsonLogger(workdir=Path.cwd() / "WORKDIR" / "SubAgent")
+
+subagent_tool_manager = ToolManager()
+load_subagent_tools(subagent_tool_manager)
+
+subagent_client = AnthropicClient(tools=subagent_tool_manager)
+subagent = BaseAgent(client=subagent_client)
+subagent_loop = SubAgentLoop(agent=subagent, tools=subagent_tool_manager)
+
 
 class Task(BaseTool):
     name = "task"
@@ -20,24 +37,11 @@ class Task(BaseTool):
         # 校验参数
         self.validate(kwargs)
 
-        command = kwargs["command"]
-
-        # 简单危险命令过滤
-        if any(d in command for d in self.dangerous):
-            return "Error: Dangerous command blocked"
+        prompt = kwargs["prompt"]
 
         try:
-            r = subprocess.run(  # 启动一个子进程执行 command，等它执行完，然后返回结果对象 r
-                command, 
-                shell=True,  # 通过 shell（比如 /bin/bash）来执行命令，有命令注入风险
-                cwd=os.getcwd(),  # 指定命令执行的“当前目录”，等价于：cd 当前目录 && 执行命令
-                capture_output=True,  # 把 stdout 和 stderr 都抓回来，否则输出会直接打印到终端 拿不到结果
-                text=True, #把输出从 bytes → 字符串 否则你拿到的是：b'hello\n'，加了之后变成："hello\n"
-                timeout=120  # 防止：死循环，卡死，挂住 agent
-            )
+            summary = subagent_loop.loop(prompt=prompt, logger=subagent_logger)
+            return summary
 
-            out = (r.stdout + r.stderr).strip()
-            return out[:50000] if out else "(no output)"
-
-        except subprocess.TimeoutExpired:
-            return "Error: Timeout (120s)"
+        except Exception as e:
+            return f"Error: {e}"

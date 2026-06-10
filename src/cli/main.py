@@ -1,5 +1,5 @@
 from src.tools.tool_manager import ToolManager
-from src.tools.tool_loader import load_all_tools, load_subagent_tools
+from src.tools.tool_loader import load_all_tools
 from src.model.AnthropicClient import AnthropicClient
 from src.agent.base_agent import BaseAgent
 from src.runtime.base_loop import BaseLoop
@@ -9,9 +9,6 @@ logger = JsonLogger()
 
 tool_manager = ToolManager()
 load_all_tools(tool_manager)
-
-subagent_tool_manager = ToolManager()
-load_subagent_tools(subagent_tool_manager)
 
 client = AnthropicClient(tools=tool_manager)
 agent = BaseAgent(client=client)
