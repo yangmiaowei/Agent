@@ -30,13 +30,19 @@ class AnthropicClient:
         self.client = Anthropic(api_key=api_key, base_url=base_url)
         self.model = model
 
-    def chat(self, messages: List[Dict[str, str]], max_tokens: int = 8000, tools: ToolManager = None) -> str:
+    def chat(
+        self,
+        messages: List[Dict[str, str]],
+        max_tokens: int = 8000,
+        tools: ToolManager = None,
+        system: str = None,
+    ) -> str:
         manager = tools or self.tools
         tool_schemas = manager.list_tools()
         # print("Tools:", tool_schemas)
         response = self.client.messages.create(
             model=self.model,
-            system=SYSTEM_PROMPT,
+            system=system or SYSTEM_PROMPT,
             messages=messages,
             tools=tool_schemas,
             max_tokens=max_tokens

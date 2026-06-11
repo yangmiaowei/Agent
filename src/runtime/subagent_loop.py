@@ -3,16 +3,17 @@ from src.logger.logger import log_message
 
 # -- Subagent: fresh context, filtered tools, summary-only return --
 class SubAgentLoop:
-    def __init__(self, agent, tools: ToolManager, memory=None, policies=None):
+    def __init__(self, agent, tools: ToolManager, memory=None, policies=None, system_prompt=None):
         self.agent = agent
         self.tools = tools
         self.memory = memory
         self.policies = policies or []
+        self.system_prompt = system_prompt
 
     def loop(self, prompt: str, logger=None):
         sub_messages = [{"role": "user", "content": prompt}]  # fresh context
         for _ in range(30):  # safety limit
-            response = self.agent.run(sub_messages, tools=self.tools)
+            response = self.agent.run(sub_messages, tools=self.tools, system=self.system_prompt)
             assistant_msg = {
                 "role": "assistant",
                 "content": [block.model_dump() for block in response.content],
