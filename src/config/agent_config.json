@@ -5,6 +5,9 @@
     "skills_enabled": true
   },
   "plugins": {
+    "skills": {
+      "enabled": true
+    },
     "subagent": {
       "enabled": true,
       "enabled_types": ["read", "shell", "full"],
