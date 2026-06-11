@@ -22,18 +22,18 @@ def build_main_runtime(config=None):
     LoadSkill.configure(skill_loader)
 
     registry = ToolRegistry()
-    PluginManager(config).register_all(registry)
+    PluginManager(config).register_all(registry)  # 注册静态定义全集
 
-    executor_tm = registry.create_tool_manager()
-    runtime = RuntimePolicyEngine(registry, executor_tm, skill_loader, config)
+    executor_tm = registry.create_tool_manager()  # 所有工具的执行入口
+    runtime = RuntimePolicyEngine(registry, executor_tm, skill_loader, config)  # 可见性裁剪等策略设置
 
-    subagent_factory = SubagentFactory(registry)
-    subagent_executor = SubagentExecutor(registry, subagent_factory)
-    executor = ToolExecutor(executor_tm, subagent_executor)
+    subagent_factory = SubagentFactory(registry)  # 独立运行环境
+    subagent_executor = SubagentExecutor(registry, subagent_factory)  # 触发 subagent 执行
+    executor = ToolExecutor(executor_tm, subagent_executor)  # 执行 + 路由 + 子世界切换
 
     client = AnthropicClient()
     agent = BaseAgent(client=client)
-    main_loop = BaseLoop(agent=agent, runtime=runtime, executor=executor)
+    main_loop = BaseLoop(agent=agent, runtime=runtime, executor=executor)  # 每一轮对话循环
 
     logger = JsonLogger()
     return main_loop, logger

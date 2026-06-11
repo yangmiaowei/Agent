@@ -10,10 +10,11 @@ class ToolExecutor:
         self._subagent = subagent_executor
 
     def run(self, name: str, args: dict, ctx: RuntimeContext, tool_view: ToolView) -> str:
+        # 权限校验
         if not tool_view.can_call(name):
             return f"Error: Tool '{name}' is not available in the current context."
-
+        # task → subagen，进入“另一个 runtime”
         if name == "task":
             return self._subagent.run(args, ctx)
-
+        # 普通 tool
         return self._tm.call(name, args)
