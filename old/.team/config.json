@@ -1,0 +1,35 @@
+{
+  "team_name": "default",
+  "members": [
+    {
+      "name": "alice",
+      "role": "frontend",
+      "status": "working"
+    },
+    {
+      "name": "bob",
+      "role": "backend",
+      "status": "working"
+    },
+    {
+      "name": "alice2",
+      "role": "engineer",
+      "status": "idle"
+    },
+    {
+      "name": "bob2",
+      "role": "engineer",
+      "status": "idle"
+    },
+    {
+      "name": "carol",
+      "role": "engineer",
+      "status": "idle"
+    },
+    {
+      "name": "dave",
+      "role": "engineer",
+      "status": "idle"
+    }
+  ]
+}

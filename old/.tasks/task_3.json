@@ -1,0 +1,8 @@
+{
+  "id": 3,
+  "subject": "Refactor main.py to use argparse",
+  "description": "Refactor main.py so it accepts command-line arguments via argparse instead of hardcoded values.",
+  "status": "in_progress",
+  "owner": "lead",
+  "blockedBy": null
+}

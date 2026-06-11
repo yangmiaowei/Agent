@@ -1,0 +1,3 @@
+{"type": "shutdown_request", "from": "lead", "content": "Please shut down gracefully.", "timestamp": 1780300261.708318, "request_id": "71a8424c"}
+{"type": "message", "from": "lead", "content": "New tasks are on the board! Check /Users/yangmw/Personal/Works/Agent/taskboard.json and claim one open task by updating its status to \"in-progress\" and adding \"claimed_by\": \"alice\". Only claim ONE task.", "timestamp": 1780367069.012716}
+{"type": "shutdown_request", "from": "lead", "content": "Please shut down gracefully.", "timestamp": 1780367096.4045088, "request_id": "6bd18bdd"}

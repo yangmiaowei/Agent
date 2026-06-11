@@ -1,0 +1,9 @@
+{
+  "plugins": {
+    "subagent": {
+      "enabled": true,
+      "enabled_types": ["read", "shell", "full"],
+      "custom_types": {}
+    }
+  }
+}
