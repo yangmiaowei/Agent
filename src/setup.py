@@ -15,6 +15,12 @@ from src.workspace import WORKDIR
 CORE_TOOLS = [Bash, EditFile, ReadFile, WriteFile, ToDo]
 SUBAGENT_TOOLS = CORE_TOOLS
 
+TOOL_PROFILES = {
+    "read":  [ReadFile],
+    "shell": [Bash, EditFile, ReadFile, WriteFile],
+    "full":    [Bash, EditFile, ReadFile, WriteFile, ToDo],
+}
+
 
 def _register(tm: ToolManager, tools):
     for t in tools:
@@ -25,6 +31,15 @@ def _build_loop(tm: ToolManager, loop_cls):
     client = AnthropicClient(tools=tm)
     agent = BaseAgent(client=client)
     return loop_cls(agent=agent, tools=tm)
+
+
+def build_subagent_runtime(profile="full"):
+    tools = TOOL_PROFILES[profile]
+    sub_tm = ToolManager()
+    _register(sub_tm, tools)
+    sub_loop = _build_loop(sub_tm, SubAgentLoop)
+    sub_logger = JsonLogger(workdir=WORKDIR / "SubAgent")
+    return sub_loop, sub_logger
 
 
 def build_main_runtime():
