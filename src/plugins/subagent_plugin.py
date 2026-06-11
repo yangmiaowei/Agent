@@ -31,9 +31,9 @@ class SubagentPlugin(Plugin):
     name = "subagent"
 
     def setup(self, ctx: BuildContext, plugin_config: dict) -> None:
-        type_defs = load_subagent_types(plugin_config)
+        type_defs = load_subagent_types(plugin_config)  # 把 subagent 类型加载出来
         if not type_defs:
             return
 
-        runtimes = {t.name: _build_subagent_runtime(t) for t in type_defs}
-        ctx.main_tm.register_instance(Task(runtimes, type_defs))
+        runtimes = {t.name: _build_subagent_runtime(t) for t in type_defs}  # 把每个 subagent 变成“可运行对象”
+        ctx.main_tm.register_instance(Task(runtimes, type_defs))  # 整个 subagent system 作为一个“任务实例”注册进主系统
