@@ -1,35 +1,36 @@
-from src.tools.bash import Bash
-from src.tools.edit_file import EditFile
-from src.tools.read_file import ReadFile
-from src.tools.write_file import WriteFile
-from src.tools.todo import ToDo
-from src.tools.tool_manager import ToolManager
-from src.model.AnthropicClient import AnthropicClient
+from pathlib import Path
+
 from src.agent.base_agent import BaseAgent
-from src.runtime.base_loop import BaseLoop
+from src.config.loader import load_config
+from src.execution.subagent_executor import SubagentExecutor
+from src.execution.subagent_factory import SubagentFactory
+from src.execution.tool_executor import ToolExecutor
+from src.logger.logger import JsonLogger
+from src.model.AnthropicClient import AnthropicClient
+from src.orchestrator.base_loop import BaseLoop
 from src.plugins.manager import PluginManager
-
-CORE_TOOLS = [Bash, EditFile, ReadFile, WriteFile, ToDo]
-
-
-def _register(tm: ToolManager, tools):
-    for t in tools:
-        tm.register(t)
-
-
-def _build_loop(tm: ToolManager, loop_cls):
-    client = AnthropicClient(tools=tm)
-    agent = BaseAgent(client=client)
-    return loop_cls(agent=agent, tools=tm)
+from src.registry.tool_registry import ToolRegistry
+from src.runtime.resolver import RuntimePolicyEngine
+from src.runtime.skill_loader import SkillLoader
 
 
 def build_main_runtime(config=None):
-    main_tm = ToolManager()
-    _register(main_tm, CORE_TOOLS)
+    config = config if config is not None else load_config()
 
-    PluginManager(config).setup_all(main_tm)
+    registry = ToolRegistry()
+    PluginManager(config).register_all(registry)
 
-    main_loop = _build_loop(main_tm, BaseLoop)
-    from src.logger.logger import JsonLogger
+    executor_tm = registry.create_tool_manager()
+    skill_loader = SkillLoader(Path(__file__).parent / "skills")
+    runtime = RuntimePolicyEngine(registry, executor_tm, skill_loader, config)
+
+    subagent_factory = SubagentFactory(registry)
+    subagent_executor = SubagentExecutor(registry, subagent_factory)
+    executor = ToolExecutor(executor_tm, subagent_executor)
+
+    client = AnthropicClient()
+    agent = BaseAgent(client=client)
+    main_loop = BaseLoop(agent=agent, runtime=runtime, executor=executor)
+
     logger = JsonLogger()
     return main_loop, logger
