@@ -12,16 +12,19 @@ from src.plugins.manager import PluginManager
 from src.registry.tool_registry import ToolRegistry
 from src.runtime.resolver import RuntimePolicyEngine
 from src.runtime.skill_loader import SkillLoader
+from src.tools.load_skill import LoadSkill
 
 
 def build_main_runtime(config=None):
     config = config if config is not None else load_config()
 
+    skill_loader = SkillLoader(Path(__file__).parent / "skills")
+    LoadSkill.configure(skill_loader)
+
     registry = ToolRegistry()
     PluginManager(config).register_all(registry)
 
     executor_tm = registry.create_tool_manager()
-    skill_loader = SkillLoader(Path(__file__).parent / "skills")
     runtime = RuntimePolicyEngine(registry, executor_tm, skill_loader, config)
 
     subagent_factory = SubagentFactory(registry)

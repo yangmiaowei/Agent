@@ -1,10 +1,12 @@
 from src.plugins.base import Plugin
 from src.plugins.core_tools_plugin import CoreToolsPlugin
+from src.plugins.skills_plugin import SkillsPlugin
 from src.plugins.subagent_plugin import SubagentPlugin
 from src.registry.tool_registry import ToolRegistry
 from src.config.loader import load_config
 
 OPTIONAL_PLUGINS: dict[str, Plugin] = {
+    "skills": SkillsPlugin(),
     "subagent": SubagentPlugin(),
 }
 

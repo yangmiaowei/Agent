@@ -1,4 +1,9 @@
 {
+  "runtime": {
+    "mode": "default",
+    "safe_mode": false,
+    "skills_enabled": true
+  },
   "plugins": {
     "subagent": {
       "enabled": true,
