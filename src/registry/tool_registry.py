@@ -1,3 +1,4 @@
+from src.logger.logger import SessionEventWriter
 from src.registry.subagent_types import SubagentTypeDef
 from src.tools.tool_manager import ToolManager
 
@@ -40,8 +41,8 @@ class ToolRegistry:
     def has_subagent_types(self) -> bool:
         return bool(self._subagent_types)
 
-    def create_tool_manager(self) -> ToolManager:
-        tm = ToolManager()
+    def create_tool_manager(self, event_logger: SessionEventWriter | None = None) -> ToolManager:
+        tm = ToolManager(logger=event_logger)
         for cls in self._tool_classes.values():
             tm.register(cls)
         return tm

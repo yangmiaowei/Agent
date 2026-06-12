@@ -2,13 +2,10 @@ import uuid
 import time
 import copy
 import traceback
-from src.logger.logger import JsonLogger
-
-
 class ToolManager:
-    def __init__(self):
+    def __init__(self, logger=None):
         self._tools = {}  # name -> tool instance
-        self.logger = JsonLogger()
+        self.logger = logger
 
         # 默认全局回调
         self.default_on_start = self._default_on_start
@@ -16,7 +13,8 @@ class ToolManager:
         self.default_on_error = self._default_on_error
     
     def _log(self, data: dict):
-        self.logger.log(data)
+        if self.logger:
+            self.logger.log(data)
 
     def _default_on_start(self, context):
         self._log({
