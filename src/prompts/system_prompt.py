@@ -1,14 +1,10 @@
-from src.workspace import WORKDIR
-
-BASE_SYSTEM_PROMPT = f"""You are a coding agent at {WORKDIR}.
-Use the task tool to delegate exploration or subtasks."""
-
-# Backward-compatible alias
-SYSTEM_PROMPT = BASE_SYSTEM_PROMPT
-
+from src.workspace import get_workdir
 
 def build_system_prompt(skill_descriptions: str | None = None) -> str:
-    parts = [BASE_SYSTEM_PROMPT]
+    parts = [
+        f"""You are a coding agent at {get_workdir()}.
+Use the task tool to delegate exploration or subtasks."""
+    ]
     if skill_descriptions:
         parts.extend([
             "",

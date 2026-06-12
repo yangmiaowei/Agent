@@ -12,10 +12,14 @@ class BaseLoop:
         self.memory = memory
         self.policies = policies or []
 
-    def loop(self, messages: list, logger=None):
+    def loop(self, messages: list, logger=None, max_rounds: int | None = None):
         ctx = RuntimeContext(messages=messages)
+        turn = 0
 
         while True:
+            if max_rounds is not None and turn >= max_rounds:
+                return
+            turn += 1
             resolved = self.runtime.resolve(ctx)
             response = self.agent.run(
                 messages,

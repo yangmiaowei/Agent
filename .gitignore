@@ -4,3 +4,5 @@ __pycache__/
 .env
 *.py[codz]
 WORKDIR
+eval_repos/
+predictions/

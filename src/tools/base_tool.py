@@ -2,7 +2,7 @@ import abc
 from typing import Any, Dict
 from pathlib import Path
 
-from src.workspace import WORKDIR
+from src.workspace import get_workdir
 
 
 class BaseTool(abc.ABC):
@@ -66,7 +66,8 @@ class BaseTool(abc.ABC):
 
 
 def safe_path(p: str) -> Path:
-    path = (WORKDIR / p).resolve()  # str -> Path
+    workdir = get_workdir()
+    path = (workdir / p).resolve()  # str -> Path
     # .resolve()：把路径“还原成真实存在的位置”
     # 例：
     # WORKDIR = /app/workspace
@@ -74,6 +75,6 @@ def safe_path(p: str) -> Path:
 
     # (WORKDIR / p)         # /app/workspace/../secret.txt
     # .resolve()            # /app/secret.txt   ← 真正位置
-    if not path.is_relative_to(WORKDIR):  # 检查这个路径是不是在 WORKDIR 里面
+    if not path.is_relative_to(workdir):  # 检查这个路径是不是在 WORKDIR 里面
         raise ValueError(f"Path escapes workspace: {p}")
     return path

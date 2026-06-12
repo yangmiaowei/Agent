@@ -4,7 +4,7 @@ from typing import List, Dict
 from anthropic import Anthropic
 from dotenv import load_dotenv
 
-from src.prompts.system_prompt import SYSTEM_PROMPT
+from src.prompts.system_prompt import build_system_prompt
 
 load_dotenv(override=True)
 
@@ -38,7 +38,7 @@ class AnthropicClient:
         tool_schemas = tools.list_tools()
         response = self.client.messages.create(
             model=self.model,
-            system=system or SYSTEM_PROMPT,
+            system=system or build_system_prompt(),
             messages=messages,
             tools=tool_schemas,
             max_tokens=max_tokens,
