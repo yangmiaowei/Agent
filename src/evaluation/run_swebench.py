@@ -5,6 +5,13 @@ import logging
 from argparse import ArgumentParser
 from pathlib import Path
 
+try:
+    from dotenv import load_dotenv
+
+    load_dotenv(override=False)
+except ImportError:
+    pass
+
 from src.evaluation.runner import run_swebench
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
@@ -42,6 +49,12 @@ def main():
         help="Maximum agent turns per instance",
     )
     parser.add_argument(
+        "--max_patch_attempts",
+        type=int,
+        default=2,
+        help="Retry count when an attempt produces an empty patch",
+    )
+    parser.add_argument(
         "--instance_ids",
         nargs="+",
         default=None,
@@ -50,9 +63,19 @@ def main():
     parser.add_argument("--shard_id", type=int, default=None)
     parser.add_argument("--num_shards", type=int, default=None)
     parser.add_argument(
-        "--no_subagent",
+        "--subagent",
         action="store_true",
-        help="Disable subagent delegation for lower cost",
+        help="Enable subagent delegation (off by default for SWE-bench)",
+    )
+    parser.add_argument(
+        "--disable_patch_gate",
+        action="store_true",
+        help="Disable lightweight patch quality gate before writing predictions",
+    )
+    parser.add_argument(
+        "--rerun_instance_ids",
+        action="store_true",
+        help="Rerun --instance_ids even if they already exist in predictions",
     )
     args = parser.parse_args()
 
@@ -69,7 +92,10 @@ def main():
         instance_ids=args.instance_ids,
         shard_id=args.shard_id,
         num_shards=args.num_shards,
-        subagent_enabled=not args.no_subagent,
+        subagent_enabled=args.subagent,
+        max_patch_attempts=args.max_patch_attempts,
+        use_patch_gate=not args.disable_patch_gate,
+        rerun_instance_ids=args.rerun_instance_ids,
     )
     print(f"Predictions written to {output_file}")
     print()

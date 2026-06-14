@@ -11,5 +11,8 @@ def load_swebench_dataset(
 def filter_instances(dataset, instance_ids: list[str] | None):
     if not instance_ids:
         return dataset
-    ids = set(instance_ids)
-    return dataset.filter(lambda x: x["instance_id"] in ids)
+    # Prefer index-based selection over Dataset.filter(lambda ...), which can
+    # involve multiprocess internals in some environments.
+    id_to_index = {instance_id: idx for idx, instance_id in enumerate(dataset["instance_id"])}
+    selected_indices = [id_to_index[iid] for iid in instance_ids if iid in id_to_index]
+    return dataset.select(selected_indices)

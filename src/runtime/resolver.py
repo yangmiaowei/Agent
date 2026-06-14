@@ -10,6 +10,7 @@ from src.runtime.tool_view import ToolView
 from src.tools.tool_manager import ToolManager
 
 SAFE_MODE_BLOCKED_TOOLS = frozenset({"bash", "edit_file", "write_file"})
+SWE_MODE_BLOCKED_TOOLS = frozenset({"todo", "write_file", "load_skill", "task"})
 READ_ONLY_TOOLS = frozenset({"read_file"})
 
 
@@ -62,6 +63,8 @@ class RuntimePolicyEngine:
 
         if mode == "safe":
             visible -= SAFE_MODE_BLOCKED_TOOLS
+        elif mode == "swe":
+            visible -= SWE_MODE_BLOCKED_TOOLS
 
         if not self._skills_enabled or not self._skill_loader.skills:
             visible.discard("load_skill")
