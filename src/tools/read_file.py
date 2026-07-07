@@ -11,7 +11,7 @@ class ReadFile(BaseTool):
             "offset": {"type": "integer"},
             "limit": {"type": "integer"},
         },
-        "required": ["path"],
+        "required": ["path"]
     }
 
     def run(self, **kwargs) -> str:

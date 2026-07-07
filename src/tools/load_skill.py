@@ -15,7 +15,7 @@ class LoadSkill(BaseTool):
                 "description": "Skill name to load",
             }
         },
-        "required": ["name"],
+        "required": ["name"]
     }
 
     _skill_loader: ClassVar[Optional[SkillLoader]] = None
