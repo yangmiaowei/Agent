@@ -8,23 +8,29 @@ class ReadFile(BaseTool):
         "type": "object",
         "properties": {
             "path": {"type": "string"},
-            "limit":{"type": "integer"}
+            "offset": {"type": "integer"},
+            "limit": {"type": "integer"},
         },
         "required": ["path"]
     }
 
     def run(self, **kwargs) -> str:
-        # 校验参数
         self.validate(kwargs)
 
         path = kwargs["path"]
+        offset = max(0, int(kwargs.get("offset") or 0))
         limit = kwargs.get("limit")
 
         try:
-            text = safe_path(path).read_text()  # 文件内容一次性读成一个字符串
-            lines = text.splitlines()  # 按换行符拆分字符串，返回一个按行分割的列表
-            if limit and limit < len(lines):
-                lines = lines[:limit] + [f"... ({len(lines) - limit} more lines)"]
-            return "\n".join(lines)[:50000]
+            text = safe_path(path).read_text()
+            lines = text.splitlines()
+            total = len(lines)
+            if offset:
+                lines = lines[offset:]
+            if limit is not None and limit < len(lines):
+                remaining = len(lines) - limit
+                lines = lines[:limit] + [f"... ({remaining} more lines)"]
+            header = f"# {path} (lines {offset + 1}-{offset + len(lines)} of {total})\n"
+            return header + "\n".join(lines)[:50000]
         except Exception as e:
             return f"Error: {e}"

@@ -1,0 +1,143 @@
+#!/usr/bin/env python3
+"""Run the agent on SWE-bench instances and write predictions for harness evaluation."""
+
+import logging
+from argparse import ArgumentParser
+from pathlib import Path
+
+try:
+    from dotenv import load_dotenv
+
+    load_dotenv(override=False)
+except ImportError:
+    pass
+
+from src.evaluation.load_data import load_suite, suite_instance_ids
+from src.evaluation.runner import run_swebench
+
+logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
+
+logger = logging.getLogger(__name__)
+
+
+def main():
+    parser = ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--dataset",
+        default="princeton-nlp/SWE-bench_Lite",
+        help="HuggingFace SWE-bench dataset name",
+    )
+    parser.add_argument("--split", default="test", help="Dataset split")
+    parser.add_argument(
+        "--output_dir",
+        type=Path,
+        required=True,
+        help="Directory for predictions jsonl",
+    )
+    parser.add_argument(
+        "--repos_root",
+        type=Path,
+        default=Path("eval_repos"),
+        help="Directory to clone SWE-bench repos into",
+    )
+    parser.add_argument(
+        "--model_name",
+        default="my-agent",
+        help="Identifier written to model_name_or_path in predictions",
+    )
+    parser.add_argument(
+        "--max_rounds",
+        type=int,
+        default=30,
+        help="Maximum agent turns per instance",
+    )
+    parser.add_argument(
+        "--max_patch_attempts",
+        type=int,
+        default=2,
+        help="Retry count when an attempt produces an empty patch",
+    )
+    parser.add_argument(
+        "--instance_ids",
+        nargs="+",
+        default=None,
+        help="Optional subset of instance IDs to run",
+    )
+    parser.add_argument(
+        "--suite",
+        type=Path,
+        default=None,
+        help=(
+            "Frozen suite JSON from src.evaluation.select_cases. Supplies the "
+            "dataset, split and instance list; mutually exclusive with --instance_ids"
+        ),
+    )
+    parser.add_argument("--shard_id", type=int, default=None)
+    parser.add_argument("--num_shards", type=int, default=None)
+    parser.add_argument(
+        "--subagent",
+        action="store_true",
+        help="Enable subagent delegation (off by default for SWE-bench)",
+    )
+    parser.add_argument(
+        "--disable_patch_gate",
+        action="store_true",
+        help="Disable lightweight patch quality gate before writing predictions",
+    )
+    parser.add_argument(
+        "--rerun_instance_ids",
+        action="store_true",
+        help="Rerun --instance_ids even if they already exist in predictions",
+    )
+    args = parser.parse_args()
+
+    if (args.shard_id is None) != (args.num_shards is None):
+        parser.error("--shard_id and --num_shards must be set together")
+
+    dataset_name, split = args.dataset, args.split
+    instance_ids = args.instance_ids
+    suite_name = None
+
+    if args.suite:
+        if instance_ids:
+            parser.error("--suite and --instance_ids are mutually exclusive")
+        suite = load_suite(args.suite)
+        dataset_name, split = suite["dataset"], suite["split"]
+        instance_ids = suite_instance_ids(suite)
+        suite_name = suite["name"]
+        logger.info(
+            "Suite %s: %d cases from %s (%s)",
+            suite_name,
+            len(instance_ids),
+            dataset_name,
+            split,
+        )
+
+    output_file = run_swebench(
+        dataset_name=dataset_name,
+        split=split,
+        output_dir=args.output_dir,
+        model_name=args.model_name,
+        repos_root=args.repos_root.resolve(),
+        max_rounds=args.max_rounds,
+        instance_ids=instance_ids,
+        suite_name=suite_name,
+        shard_id=args.shard_id,
+        num_shards=args.num_shards,
+        subagent_enabled=args.subagent,
+        max_patch_attempts=args.max_patch_attempts,
+        use_patch_gate=not args.disable_patch_gate,
+        rerun_instance_ids=args.rerun_instance_ids,
+    )
+    print(f"Predictions written to {output_file}")
+    print()
+    print("Score with the harness and fold results back into the run:")
+    print(
+        "  python -m src.evaluation.run_eval \\"
+        f"\n    --run_dir {args.output_dir} \\"
+        f"\n    --run_id <your-run-id>"
+    )
+
+
+if __name__ == "__main__":
+    main()

@@ -2,7 +2,7 @@ from src.setup import build_main_runtime
 from src.logger.logger import log_message
 
 # tools 定义能力，setup 组装一切，入口只调一个函数。
-agent_loop, logger = build_main_runtime()
+agent_loop, log_session = build_main_runtime()
 
 # 修复 macOS 终端里 Python 输入中文 / 特殊字符 / 退格键异常的问题
 try:
@@ -27,5 +27,5 @@ if __name__ == "__main__":
 
         user_msg = {"role": "user", "content": query}
         history.append(user_msg)
-        log_message(logger, user_msg)
-        agent_loop.loop(history, logger=logger)
+        log_message(log_session.events, user_msg)
+        agent_loop.loop(history, logger=log_session.events)

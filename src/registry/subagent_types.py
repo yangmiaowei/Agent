@@ -1,14 +1,8 @@
-from dataclasses import dataclass, field
-from typing import Optional
+from dataclasses import dataclass
+from typing import TYPE_CHECKING, Optional
 
-from src.tools.bash import Bash
-from src.tools.edit_file import EditFile
-from src.tools.read_file import ReadFile
-from src.tools.write_file import WriteFile
-from src.tools.todo import ToDo
-
-CORE_TOOL_CLASSES = [Bash, EditFile, ReadFile, WriteFile, ToDo]
-TOOL_CLASS_BY_NAME = {cls().name: cls for cls in CORE_TOOL_CLASSES}
+if TYPE_CHECKING:
+    from src.registry.tool_registry import ToolRegistry
 
 
 @dataclass
@@ -18,10 +12,10 @@ class SubagentTypeDef:
     tool_names: list[str]
     system_prompt: Optional[str] = None
 
-    def resolve_tool_classes(self) -> list:
+    def resolve_tool_classes(self, registry: "ToolRegistry") -> list:
         classes = []
         for name in self.tool_names:
-            cls = TOOL_CLASS_BY_NAME.get(name)
+            cls = registry.get_tool_class(name)
             if cls is None:
                 raise ValueError(f"Unknown tool '{name}' in subagent type '{self.name}'")
             classes.append(cls)

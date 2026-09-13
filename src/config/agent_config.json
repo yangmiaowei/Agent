@@ -1,9 +1,25 @@
 {
+  "runtime": {
+    "mode": "default",
+    "safe_mode": false,
+    "skills_enabled": true
+  },
   "plugins": {
+    "skills": {
+      "enabled": true
+    },
     "subagent": {
       "enabled": true,
       "enabled_types": ["read", "shell", "full"],
       "custom_types": {}
     }
+  },
+  "context_compact": {
+    "enabled": true,
+    "threshold": 50000,
+    "keep_recent": 3,
+    "preserve_result_tools": ["read_file", "grep"],
+    "transcript_dir": ".transcripts",
+    "summary_max_tokens": 2000
   }
 }

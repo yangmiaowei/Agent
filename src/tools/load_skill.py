@@ -1,35 +1,31 @@
-from src.tools.base_tool import BaseTool, safe_path
+from typing import ClassVar, Optional
+
+from src.runtime.skill_loader import SkillLoader
+from src.tools.base_tool import BaseTool
 
 
 class LoadSkill(BaseTool):
     name = "load_skill"
     description = "Load specialized knowledge by name."
     input_schema = {
-        "type": "object", 
+        "type": "object",
         "properties": {
             "name": {
-                "type": "string", 
-                "description": "Skill name to load"
+                "type": "string",
+                "description": "Skill name to load",
             }
-        }, 
+        },
         "required": ["name"]
     }
 
+    _skill_loader: ClassVar[Optional[SkillLoader]] = None
+
+    @classmethod
+    def configure(cls, skill_loader: SkillLoader) -> None:
+        cls._skill_loader = skill_loader
 
     def run(self, **kwargs) -> str:
-        # 校验参数
         self.validate(kwargs)
-
-        path = kwargs["path"]
-        old_text = kwargs["old_text"]
-        new_text = kwargs["new_text"]
-
-        try:
-            fp = safe_path(path)
-            content = fp.read_text()
-            if old_text not in content:
-                return f"Error: Text not found in {path}"
-            fp.write_text(content.replace(old_text, new_text, 1))
-            return f"Edited {path}"
-        except Exception as e:
-            return f"Error: {e}" 
+        if self._skill_loader is None:
+            return "Error: Skill loader is not configured."
+        return self._skill_loader.get_content(kwargs["name"])

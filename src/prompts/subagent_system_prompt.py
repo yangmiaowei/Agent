@@ -1,4 +1,10 @@
-from src.workspace import WORKDIR
+from src.workspace import get_workdir
 
-SUBAGENT_SYSTEM_PROMPT = f"""You are a coding subagent at {WORKDIR}. 
+
+def build_subagent_system_prompt() -> str:
+    return f"""You are a coding subagent at {get_workdir()}.
 Complete the given task, then summarize your findings."""
+
+
+# Backward-compatible alias
+SUBAGENT_SYSTEM_PROMPT = build_subagent_system_prompt()
