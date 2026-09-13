@@ -1,0 +1,13 @@
+# Core runtime (also declared in pyproject.toml)
+anthropic>=0.40.0
+python-dotenv>=1.0.0
+PyYAML>=6.0
+datasets>=2.19.0
+
+# Dev / unit tests
+pytest>=8.0.0
+
+# Optional: SWE-bench official harness (Docker required at score time).
+# Prefer editable install from a local clone so you control the version:
+#   cd /path/to/SWE-bench && pip install -e .
+# swebench>=2.0.0

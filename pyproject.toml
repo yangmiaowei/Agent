@@ -1,0 +1,46 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "agent"
+version = "0.1.0"
+description = "Tool-using agent runtime with SWE-bench evaluation harness"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+authors = [{ name = "yangmw" }]
+dependencies = [
+    "anthropic>=0.40.0",
+    "python-dotenv>=1.0.0",
+    "PyYAML>=6.0",
+    "datasets>=2.19.0",
+]
+
+[project.optional-dependencies]
+eval = [
+    # Prefer editable install of a local SWE-bench clone:
+    #   cd /path/to/SWE-bench && pip install -e .
+    "swebench>=2.0.0",
+]
+dev = [
+    "pytest>=8.0.0",
+]
+
+[project.urls]
+Documentation = "docs/"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["src*"]
+exclude = ["src.skills*", "src.*.__pycache__*"]
+
+[tool.setuptools.package-data]
+src = [
+    "config/agent_config.json",
+    "skills/**/*",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
