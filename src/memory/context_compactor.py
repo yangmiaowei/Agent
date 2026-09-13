@@ -28,7 +28,12 @@ def micro_compact(messages: list, keep_recent: int = 3, preserve_result_tools: l
             content = msg.get("content", [])
             if isinstance(content, list):
                 for block in content:
-                    if hasattr(block, "type") and block.type == "tool_use":
+                    # Loops append assistant content as dicts (block.model_dump()),
+                    # but SDK objects can also show up; handle both.
+                    if isinstance(block, dict):
+                        if block.get("type") == "tool_use":
+                            tool_name_map[block.get("id")] = block.get("name")
+                    elif getattr(block, "type", None) == "tool_use":
                         tool_name_map[block.id] = block.name
     # Clear old results (keep last KEEP_RECENT). Preserve read_file outputs because
     # they are reference material; compacting them forces the agent to re-read files.
@@ -57,7 +62,7 @@ def auto_compact(messages: list, transcript_dir: str) -> list:
     # Ask LLM to summarize
     conversation_text = json.dumps(messages, default=str)[-80000:]
     client = AnthropicClient()
-    response = client.chat(
+    response = client.complete(
         messages=[{"role": "user", "content":
             "Summarize this conversation for continuity. Include: "
             "1) What was accomplished, 2) Current state, 3) Key decisions made. "

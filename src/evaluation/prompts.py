@@ -1,13 +1,5 @@
 def build_task_prompt(instance: dict, *, strict: bool = False) -> str:
     problem = instance.get("problem_statement") or ""
-    slots_hint = ""
-    if "__dict__" in problem.lower() and "__slots__" in problem.lower():
-        slots_hint = """
-Hint for this issue:
-- Check mixin/base classes in the inheritance chain, especially sympy/core/_print_helpers.py (class Printable).
-- A common fix is adding `__slots__ = ()` to a mixin that currently has no slots.
-- Do NOT remove existing `__slots__` declarations from subclasses.
-"""
 
     prompt = f"""You are tasked with fixing a bug in an open-source repository.
 
@@ -18,7 +10,7 @@ Working directory: the repository root (use relative paths from here).
 <problem_statement>
 {problem}
 </problem_statement>
-{slots_hint}
+
 Instructions:
 1. Use bash/grep to locate relevant files, then read_file with offset/limit for specific sections.
 2. Apply the fix with edit_file by modifying existing tracked source files.
@@ -35,6 +27,5 @@ Critical constraints for this attempt:
 - Do not spend turns creating standalone scripts or broad repo exploration.
 - If runtime dependencies are missing, still implement a source patch based on static analysis.
 - Prefer a minimal patch over extensive investigation.
-- If the issue involves __slots__, inspect mixin classes and prefer adding `__slots__ = ()` over deleting slots.
 """
     return prompt

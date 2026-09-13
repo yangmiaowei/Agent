@@ -12,9 +12,12 @@ try:
 except ImportError:
     pass
 
+from src.evaluation.load_data import load_suite, suite_instance_ids
 from src.evaluation.runner import run_swebench
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
+
+logger = logging.getLogger(__name__)
 
 
 def main():
@@ -60,6 +63,15 @@ def main():
         default=None,
         help="Optional subset of instance IDs to run",
     )
+    parser.add_argument(
+        "--suite",
+        type=Path,
+        default=None,
+        help=(
+            "Frozen suite JSON from src.evaluation.select_cases. Supplies the "
+            "dataset, split and instance list; mutually exclusive with --instance_ids"
+        ),
+    )
     parser.add_argument("--shard_id", type=int, default=None)
     parser.add_argument("--num_shards", type=int, default=None)
     parser.add_argument(
@@ -82,14 +94,34 @@ def main():
     if (args.shard_id is None) != (args.num_shards is None):
         parser.error("--shard_id and --num_shards must be set together")
 
+    dataset_name, split = args.dataset, args.split
+    instance_ids = args.instance_ids
+    suite_name = None
+
+    if args.suite:
+        if instance_ids:
+            parser.error("--suite and --instance_ids are mutually exclusive")
+        suite = load_suite(args.suite)
+        dataset_name, split = suite["dataset"], suite["split"]
+        instance_ids = suite_instance_ids(suite)
+        suite_name = suite["name"]
+        logger.info(
+            "Suite %s: %d cases from %s (%s)",
+            suite_name,
+            len(instance_ids),
+            dataset_name,
+            split,
+        )
+
     output_file = run_swebench(
-        dataset_name=args.dataset,
-        split=args.split,
+        dataset_name=dataset_name,
+        split=split,
         output_dir=args.output_dir,
         model_name=args.model_name,
         repos_root=args.repos_root.resolve(),
         max_rounds=args.max_rounds,
-        instance_ids=args.instance_ids,
+        instance_ids=instance_ids,
+        suite_name=suite_name,
         shard_id=args.shard_id,
         num_shards=args.num_shards,
         subagent_enabled=args.subagent,
@@ -99,14 +131,11 @@ def main():
     )
     print(f"Predictions written to {output_file}")
     print()
-    print("Evaluate with SWE-bench harness:")
+    print("Score with the harness and fold results back into the run:")
     print(
-        "  python -m swebench.harness.run_evaluation \\"
-        f"\n    --dataset_name {args.dataset} \\"
-        f"\n    --split {args.split} \\"
-        f"\n    --predictions_path {output_file} \\"
-        "\n    --max_workers 4 \\"
-        "\n    --run_id <your-run-id>"
+        "  python -m src.evaluation.run_eval \\"
+        f"\n    --run_dir {args.output_dir} \\"
+        f"\n    --run_id <your-run-id>"
     )
 
 

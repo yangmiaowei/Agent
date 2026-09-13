@@ -7,6 +7,7 @@ from src.registry.tool_registry import ToolRegistry
 from src.runtime.context import RuntimeContext
 from src.runtime.skill_loader import SkillLoader
 from src.runtime.tool_view import ToolView
+from src.tools.bash_policy import policy_for_mode, set_bash_policy
 from src.tools.tool_manager import ToolManager
 
 SAFE_MODE_BLOCKED_TOOLS = frozenset({"bash", "edit_file", "write_file"})
@@ -44,10 +45,14 @@ class RuntimePolicyEngine:
 
     def resolve(self, ctx: RuntimeContext) -> ResolvedRuntime:
         mode = self._effective_mode(ctx)
+        # Visibility is not enough for bash: it stays available in swe mode but
+        # must not be allowed to mutate the host environment.
+        set_bash_policy(policy_for_mode(mode))
         visible = self._resolve_visible_tools(ctx, mode)
         extra_schemas = self._resolve_extra_schemas(mode, visible)
 
         tool_view = ToolView(self._executor_tm, visible, extra_schemas)
+        # Built after extra schemas so `visible` reflects the final tool set.
         system_prompt = self._build_system_prompt(visible)
         return ResolvedRuntime(tool_view=tool_view, system_prompt=system_prompt)
 
@@ -101,4 +106,4 @@ class RuntimePolicyEngine:
             and self._skill_loader.skills
         ):
             skill_descriptions = self._skill_loader.get_descriptions()
-        return build_system_prompt(skill_descriptions)
+        return build_system_prompt(skill_descriptions, visible_tools=visible)

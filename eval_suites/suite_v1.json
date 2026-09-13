@@ -1,0 +1,454 @@
+{
+  "name": "suite_v1",
+  "dataset": "princeton-nlp/SWE-bench_Verified",
+  "split": "test",
+  "seed": 20260911,
+  "per_cell": 2,
+  "repo_cap": 3,
+  "taxonomy_version": "v4",
+  "tiers": [
+    {
+      "tier": "T1",
+      "difficulty": "<15 min fix"
+    },
+    {
+      "tier": "T2",
+      "difficulty": "15 min - 1 hour"
+    },
+    {
+      "tier": "T3",
+      "difficulty": "1-4 hours"
+    }
+  ],
+  "problem_types": [
+    "crash",
+    "rendering",
+    "api-behavior",
+    "wrong-output"
+  ],
+  "size": 24,
+  "created_at": "2026-09-11T19:56:15",
+  "warnings": [],
+  "distribution": {
+    "by_tier": {
+      "T1": 8,
+      "T2": 8,
+      "T3": 8
+    },
+    "by_problem_type": {
+      "api-behavior": 6,
+      "crash": 6,
+      "rendering": 6,
+      "wrong-output": 6
+    },
+    "by_repo": {
+      "pallets/flask": 1,
+      "pydata/xarray": 2,
+      "psf/requests": 1,
+      "pylint-dev/pylint": 2,
+      "scikit-learn/scikit-learn": 2,
+      "sphinx-doc/sphinx": 3,
+      "pytest-dev/pytest": 2,
+      "astropy/astropy": 2,
+      "matplotlib/matplotlib": 2,
+      "sympy/sympy": 3,
+      "mwaskom/seaborn": 2,
+      "django/django": 2
+    },
+    "multi_file_gold": 7
+  },
+  "cases": [
+    {
+      "instance_id": "pallets__flask-5014",
+      "repo": "pallets/flask",
+      "difficulty": "<15 min fix",
+      "tier": "T1",
+      "problem_type": "api-behavior",
+      "gold_files": [
+        "src/flask/blueprints.py"
+      ],
+      "gold_n_files": 1,
+      "gold_edit_lines": 3,
+      "gold_hunks": 1,
+      "f2p_count": 1,
+      "p2p_count": 59,
+      "problem_statement_len": 195
+    },
+    {
+      "instance_id": "pydata__xarray-4356",
+      "repo": "pydata/xarray",
+      "difficulty": "<15 min fix",
+      "tier": "T1",
+      "problem_type": "api-behavior",
+      "gold_files": [
+        "xarray/core/nanops.py"
+      ],
+      "gold_n_files": 1,
+      "gold_edit_lines": 6,
+      "gold_hunks": 1,
+      "f2p_count": 8,
+      "p2p_count": 604,
+      "problem_statement_len": 703
+    },
+    {
+      "instance_id": "psf__requests-1724",
+      "repo": "psf/requests",
+      "difficulty": "<15 min fix",
+      "tier": "T1",
+      "problem_type": "crash",
+      "gold_files": [
+        "requests/sessions.py"
+      ],
+      "gold_n_files": 1,
+      "gold_edit_lines": 5,
+      "gold_hunks": 2,
+      "f2p_count": 6,
+      "p2p_count": 79,
+      "problem_statement_len": 7476
+    },
+    {
+      "instance_id": "pylint-dev__pylint-6903",
+      "repo": "pylint-dev/pylint",
+      "difficulty": "<15 min fix",
+      "tier": "T1",
+      "problem_type": "crash",
+      "gold_files": [
+        "pylint/lint/run.py"
+      ],
+      "gold_n_files": 1,
+      "gold_edit_lines": 7,
+      "gold_hunks": 1,
+      "f2p_count": 1,
+      "p2p_count": 8,
+      "problem_statement_len": 2662
+    },
+    {
+      "instance_id": "scikit-learn__scikit-learn-14983",
+      "repo": "scikit-learn/scikit-learn",
+      "difficulty": "<15 min fix",
+      "tier": "T1",
+      "problem_type": "rendering",
+      "gold_files": [
+        "sklearn/model_selection/_split.py"
+      ],
+      "gold_n_files": 1,
+      "gold_edit_lines": 5,
+      "gold_hunks": 2,
+      "f2p_count": 2,
+      "p2p_count": 105,
+      "problem_statement_len": 1297
+    },
+    {
+      "instance_id": "sphinx-doc__sphinx-9281",
+      "repo": "sphinx-doc/sphinx",
+      "difficulty": "<15 min fix",
+      "tier": "T1",
+      "problem_type": "rendering",
+      "gold_files": [
+        "sphinx/util/inspect.py"
+      ],
+      "gold_n_files": 1,
+      "gold_edit_lines": 7,
+      "gold_hunks": 2,
+      "f2p_count": 1,
+      "p2p_count": 38,
+      "problem_statement_len": 809
+    },
+    {
+      "instance_id": "pylint-dev__pylint-7277",
+      "repo": "pylint-dev/pylint",
+      "difficulty": "<15 min fix",
+      "tier": "T1",
+      "problem_type": "wrong-output",
+      "gold_files": [
+        "pylint/__init__.py"
+      ],
+      "gold_n_files": 1,
+      "gold_edit_lines": 5,
+      "gold_hunks": 1,
+      "f2p_count": 1,
+      "p2p_count": 122,
+      "problem_statement_len": 1087
+    },
+    {
+      "instance_id": "pytest-dev__pytest-7982",
+      "repo": "pytest-dev/pytest",
+      "difficulty": "<15 min fix",
+      "tier": "T1",
+      "problem_type": "wrong-output",
+      "gold_files": [
+        "src/_pytest/pathlib.py"
+      ],
+      "gold_n_files": 1,
+      "gold_edit_lines": 2,
+      "gold_hunks": 1,
+      "f2p_count": 1,
+      "p2p_count": 78,
+      "problem_statement_len": 451
+    },
+    {
+      "instance_id": "astropy__astropy-14182",
+      "repo": "astropy/astropy",
+      "difficulty": "15 min - 1 hour",
+      "tier": "T2",
+      "problem_type": "api-behavior",
+      "gold_files": [
+        "astropy/io/ascii/rst.py"
+      ],
+      "gold_n_files": 1,
+      "gold_edit_lines": 41,
+      "gold_hunks": 3,
+      "f2p_count": 1,
+      "p2p_count": 9,
+      "problem_statement_len": 1871
+    },
+    {
+      "instance_id": "matplotlib__matplotlib-26342",
+      "repo": "matplotlib/matplotlib",
+      "difficulty": "15 min - 1 hour",
+      "tier": "T2",
+      "problem_type": "api-behavior",
+      "gold_files": [
+        "lib/matplotlib/collections.py"
+      ],
+      "gold_n_files": 1,
+      "gold_edit_lines": 7,
+      "gold_hunks": 2,
+      "f2p_count": 1,
+      "p2p_count": 81,
+      "problem_statement_len": 571
+    },
+    {
+      "instance_id": "matplotlib__matplotlib-24026",
+      "repo": "matplotlib/matplotlib",
+      "difficulty": "15 min - 1 hour",
+      "tier": "T2",
+      "problem_type": "crash",
+      "gold_files": [
+        "lib/matplotlib/stackplot.py"
+      ],
+      "gold_n_files": 1,
+      "gold_edit_lines": 13,
+      "gold_hunks": 3,
+      "f2p_count": 2,
+      "p2p_count": 764,
+      "problem_statement_len": 2133
+    },
+    {
+      "instance_id": "pytest-dev__pytest-7324",
+      "repo": "pytest-dev/pytest",
+      "difficulty": "15 min - 1 hour",
+      "tier": "T2",
+      "problem_type": "crash",
+      "gold_files": [
+        "src/_pytest/mark/expression.py"
+      ],
+      "gold_n_files": 1,
+      "gold_edit_lines": 10,
+      "gold_hunks": 3,
+      "f2p_count": 3,
+      "p2p_count": 58,
+      "problem_statement_len": 469
+    },
+    {
+      "instance_id": "sympy__sympy-15976",
+      "repo": "sympy/sympy",
+      "difficulty": "15 min - 1 hour",
+      "tier": "T2",
+      "problem_type": "rendering",
+      "gold_files": [
+        "sympy/printing/mathml.py"
+      ],
+      "gold_n_files": 1,
+      "gold_edit_lines": 33,
+      "gold_hunks": 2,
+      "f2p_count": 1,
+      "p2p_count": 37,
+      "problem_statement_len": 1053
+    },
+    {
+      "instance_id": "sympy__sympy-21612",
+      "repo": "sympy/sympy",
+      "difficulty": "15 min - 1 hour",
+      "tier": "T2",
+      "problem_type": "rendering",
+      "gold_files": [
+        "sympy/printing/str.py"
+      ],
+      "gold_n_files": 1,
+      "gold_edit_lines": 2,
+      "gold_hunks": 1,
+      "f2p_count": 1,
+      "p2p_count": 98,
+      "problem_statement_len": 681
+    },
+    {
+      "instance_id": "mwaskom__seaborn-3069",
+      "repo": "mwaskom/seaborn",
+      "difficulty": "15 min - 1 hour",
+      "tier": "T2",
+      "problem_type": "wrong-output",
+      "gold_files": [
+        "seaborn/_core/plot.py"
+      ],
+      "gold_n_files": 1,
+      "gold_edit_lines": 15,
+      "gold_hunks": 4,
+      "f2p_count": 2,
+      "p2p_count": 94,
+      "problem_statement_len": 1188
+    },
+    {
+      "instance_id": "mwaskom__seaborn-3187",
+      "repo": "mwaskom/seaborn",
+      "difficulty": "15 min - 1 hour",
+      "tier": "T2",
+      "problem_type": "wrong-output",
+      "gold_files": [
+        "seaborn/_core/scales.py",
+        "seaborn/utils.py"
+      ],
+      "gold_n_files": 2,
+      "gold_edit_lines": 12,
+      "gold_hunks": 2,
+      "f2p_count": 2,
+      "p2p_count": 248,
+      "problem_statement_len": 1438
+    },
+    {
+      "instance_id": "django__django-16560",
+      "repo": "django/django",
+      "difficulty": "1-4 hours",
+      "tier": "T3",
+      "problem_type": "api-behavior",
+      "gold_files": [
+        "django/contrib/postgres/constraints.py",
+        "django/db/models/constraints.py"
+      ],
+      "gold_n_files": 2,
+      "gold_edit_lines": 85,
+      "gold_hunks": 18,
+      "f2p_count": 8,
+      "p2p_count": 66,
+      "problem_statement_len": 840
+    },
+    {
+      "instance_id": "scikit-learn__scikit-learn-25102",
+      "repo": "scikit-learn/scikit-learn",
+      "difficulty": "1-4 hours",
+      "tier": "T3",
+      "problem_type": "api-behavior",
+      "gold_files": [
+        "sklearn/base.py",
+        "sklearn/feature_selection/_base.py"
+      ],
+      "gold_n_files": 2,
+      "gold_edit_lines": 29,
+      "gold_hunks": 7,
+      "f2p_count": 2,
+      "p2p_count": 59,
+      "problem_statement_len": 2534
+    },
+    {
+      "instance_id": "django__django-15957",
+      "repo": "django/django",
+      "difficulty": "1-4 hours",
+      "tier": "T3",
+      "problem_type": "crash",
+      "gold_files": [
+        "django/db/models/fields/related_descriptors.py"
+      ],
+      "gold_n_files": 1,
+      "gold_edit_lines": 33,
+      "gold_hunks": 4,
+      "f2p_count": 4,
+      "p2p_count": 89,
+      "problem_statement_len": 854
+    },
+    {
+      "instance_id": "sympy__sympy-17630",
+      "repo": "sympy/sympy",
+      "difficulty": "1-4 hours",
+      "tier": "T3",
+      "problem_type": "crash",
+      "gold_files": [
+        "sympy/matrices/expressions/matexpr.py"
+      ],
+      "gold_n_files": 1,
+      "gold_edit_lines": 2,
+      "gold_hunks": 1,
+      "f2p_count": 2,
+      "p2p_count": 19,
+      "problem_statement_len": 3430
+    },
+    {
+      "instance_id": "sphinx-doc__sphinx-8548",
+      "repo": "sphinx-doc/sphinx",
+      "difficulty": "1-4 hours",
+      "tier": "T3",
+      "problem_type": "rendering",
+      "gold_files": [
+        "sphinx/ext/autodoc/__init__.py",
+        "sphinx/ext/autodoc/importer.py"
+      ],
+      "gold_n_files": 2,
+      "gold_edit_lines": 50,
+      "gold_hunks": 4,
+      "f2p_count": 1,
+      "p2p_count": 5,
+      "problem_statement_len": 358
+    },
+    {
+      "instance_id": "sphinx-doc__sphinx-9461",
+      "repo": "sphinx-doc/sphinx",
+      "difficulty": "1-4 hours",
+      "tier": "T3",
+      "problem_type": "rendering",
+      "gold_files": [
+        "sphinx/domains/python.py",
+        "sphinx/ext/autodoc/__init__.py",
+        "sphinx/util/inspect.py"
+      ],
+      "gold_n_files": 3,
+      "gold_edit_lines": 52,
+      "gold_hunks": 7,
+      "f2p_count": 3,
+      "p2p_count": 59,
+      "problem_statement_len": 2294
+    },
+    {
+      "instance_id": "astropy__astropy-14369",
+      "repo": "astropy/astropy",
+      "difficulty": "1-4 hours",
+      "tier": "T3",
+      "problem_type": "wrong-output",
+      "gold_files": [
+        "astropy/units/format/cds.py",
+        "astropy/units/format/cds_parsetab.py"
+      ],
+      "gold_n_files": 2,
+      "gold_edit_lines": 65,
+      "gold_hunks": 5,
+      "f2p_count": 3,
+      "p2p_count": 732,
+      "problem_statement_len": 2597
+    },
+    {
+      "instance_id": "pydata__xarray-3993",
+      "repo": "pydata/xarray",
+      "difficulty": "1-4 hours",
+      "tier": "T3",
+      "problem_type": "wrong-output",
+      "gold_files": [
+        "xarray/core/dataarray.py",
+        "xarray/core/dataset.py"
+      ],
+      "gold_n_files": 2,
+      "gold_edit_lines": 49,
+      "gold_hunks": 5,
+      "f2p_count": 2,
+      "p2p_count": 2398,
+      "problem_statement_len": 919
+    }
+  ]
+}

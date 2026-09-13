@@ -1,76 +1,76 @@
 # Agent 接入 SWE-bench 评测说明
 
-本文档说明如何将本项目的 tool-using agent 接入 [SWE-bench](https://github.com/SWE-bench/SWE-bench) 官方评测流程：生成与官方兼容的 `predictions.jsonl`，再使用 SWE-bench harness 进行评测。
+本文档说明如何将本项目的 tool-using agent 接入 [SWE-bench](https://github.com/SWE-bench/SWE-bench)
+官方评测：生成兼容的 `predictions.jsonl`，再用官方 harness 打分。
+
+样本分层、难度/问题类型、推理与打分闭环的设计说明见
+[SWE-bench 评测体系说明](./SWE-bench评测体系说明.md)。日常迭代请以冻结样本
+`eval_suites/suite_v1.json`（Verified，24 题）为准。
 
 ---
 
 ## 1. 整体架构
 
-与 SWE-bench 官方 `run_api.py`（单次 LLM 调用 → 从文本解析 diff）不同，本方案基于**多轮工具调用 agent**，在真实仓库中修改代码，最后用 `git diff` 提取 patch。
+与官方 `run_api.py`（单次 LLM 调用 → 从文本解析 diff）不同，本方案在真实仓库里
+多轮工具调用，最后用 `git diff` 取 patch。
 
 ```
-SWE-bench 数据集 (HuggingFace)
+SWE-bench Verified (HuggingFace) + suite_v1.json
         │
         ▼
-  每个 instance 准备 repo（clone + checkout base_commit）
+  clone / checkout base_commit（eval_repos/）
         │
         ▼
-  SweBenchLoop 运行 agent（bash / read_file / edit_file）
+  SweBenchLoop（mode=swe：bash / read_file / edit_file）
         │
         ▼
-  git diff → model_patch
+  git diff → model_patch → predictions.jsonl
         │
         ▼
-  predictions.jsonl（官方格式）
+  run_eval → swebench.harness.run_evaluation（Docker）
         │
         ▼
-  swebench.harness.run_evaluation（Docker 评测）
+  summary.json + analysis.json
 ```
-
-### 与官方脚本的对比
 
 | 维度 | 官方 `run_api.py` | 本 agent |
 |------|-------------------|----------|
-| 输入 | 预处理好的 `text` prompt | `problem_statement` + 真实 repo |
+| 输入 | 预处理 `text` prompt | `problem_statement` + 真实 repo |
 | 执行 | 一次 API 调用 | 多轮 tool use |
 | patch 来源 | `extract_diff(completion)` | `git diff` |
-| 环境 | 无 repo | 每个 instance 独立 repo |
+| 环境 | 无 repo | 每题独立 checkout |
 
 ### 核心模块
 
 | 文件 | 作用 |
 |------|------|
-| `src/evaluation/run_swebench.py` | CLI 入口 |
-| `src/evaluation/runner.py` | 批量推理、断点续跑、patch 门禁 |
-| `src/evaluation/workspace_setup.py` | clone 镜像仓库、checkout、代理与重试 |
-| `src/evaluation/agent_loop.py` | SWE 专用 agent 循环（编辑追踪、强制提醒） |
-| `src/evaluation/prompts.py` | 构造 issue 修复 prompt |
-| `src/evaluation/extract_patch.py` | `git diff` 提取 patch |
-| `src/evaluation/load_data.py` | 加载 HuggingFace 数据集 |
-| `src/workspace.py` | 动态 `WORKDIR`（每个 instance 切换 repo 目录） |
+| `select_cases.py` | 分层抽样，写出冻结 suite |
+| `run_swebench.py` / `runner.py` | 批量推理、断点续跑、patch 门禁、`result.json` |
+| `workspace_setup.py` | 浅克隆、按 commit checkout、镜像源 fallback |
+| `agent_loop.py` | SWE 循环：编辑追踪 + 迟期提醒 |
+| `extract_patch.py` | `git diff` 取 patch |
+| `run_eval.py` / `evaluator.py` | 调官方 harness；预拉/打分后删镜像；写 `summary.json` |
+| `analyze.py` | 失败根因分桶 → `analysis.json` |
+| `bash_policy.py` | swe 模式下拦截 `pip install` 等改环境命令 |
 
 ---
 
 ## 2. Predictions 格式
 
-SWE-bench harness 接受 `.jsonl`，每行一条 JSON，**最少需要**：
+Harness 接受 `.jsonl`，每行最少：
 
 ```json
 {
-  "instance_id": "sympy__sympy-20590",
+  "instance_id": "pallets__flask-5014",
   "model_name_or_path": "my-agent",
   "model_patch": "diff --git a/...\n..."
 }
 ```
 
-- `instance_id`：SWE-bench 题目 ID
-- `model_name_or_path`：模型/系统标识（用于日志目录命名）
-- `model_patch`：unified diff（`git diff` 格式）
+空 patch **不写入** predictions（会记在 `logs/<iid>/result.json`，status=`empty_patch`）。
 
-空 patch 的 instance 不会被写入 predictions，评测时也会被跳过。
-
-输出文件命名：`{model_name}__{dataset_slug}__{split}.jsonl`  
-例如：`predictions/my-agent__SWE-bench_Lite__test.jsonl`
+文件名：`{model_name}__{dataset_slug}__{split}.jsonl`  
+例：`runs/baseline/my-agent__SWE-bench_Verified__test.jsonl`
 
 ---
 
@@ -79,109 +79,113 @@ SWE-bench harness 接受 `.jsonl`，每行一条 JSON，**最少需要**：
 ### 3.1 依赖
 
 ```bash
-# Agent 项目
-pip install datasets python-dotenv anthropic  # 及项目已有依赖
+# Agent 侧（示例：anaconda base 已装 datasets / anthropic / swebench）
+pip install datasets python-dotenv anthropic
 
-# SWE-bench 评测（在 SWE-bench 仓库目录）
-cd /path/to/SWE-bench
-pip install -e .
+# 官方 harness（editable 安装本地 SWE-bench clone，勿改其源码）
+cd /path/to/SWE-bench && pip install -e .
 ```
 
-### 3.2 环境变量
-
-在项目根目录 `.env` 中配置（`run_swebench` 会自动加载）：
+### 3.2 环境变量（项目根 `.env`）
 
 ```env
 ANTHROPIC_API_KEY=...
-ANTHROPIC_BASE_URL=...   # 若使用第三方代理
+ANTHROPIC_BASE_URL=...   # 兼容 Anthropic 协议的网关时可设
 MODEL=...
 
-# 访问 GitHub 不稳定时建议配置代理
+# 访问 GitHub 不稳定时建议配置
 https_proxy=http://127.0.0.1:7890
 http_proxy=http://127.0.0.1:7890
 ```
 
 ### 3.3 Docker
 
-官方 harness 评测需要 Docker 已安装并运行。
+Harness 需要 Docker Desktop 已启动。Apple Silicon 上用官方 **x86_64** 预构建镜像
+（amd64 模拟）；`run_eval` 会按需 `docker pull --platform linux/amd64`，
+**打分后默认删除**该题镜像。磁盘紧时务必加 `--sequential`。
 
 ---
 
 ## 4. 使用方法
 
-### 4.1 单题 smoke test（推荐先做）
+### 4.1 推荐：冻结 suite 上跑一轮
 
 ```bash
 cd /path/to/Agent
 
-python -m src.evaluation.run_swebench \
-  --output_dir ./predictions \
+# 1) 推理（可断点续跑）
+PYTHONPATH=. python -m src.evaluation.run_swebench \
+  --output_dir runs/baseline \
+  --suite eval_suites/suite_v1.json \
   --repos_root ./eval_repos \
   --model_name my-agent \
-  --instance_ids sympy__sympy-20590 \
   --max_rounds 30 \
-  --max_patch_attempts 3
+  --max_patch_attempts 1
+
+# 2) 打分（一题一拉、一打、一删）
+PYTHONPATH=. python -m src.evaluation.run_eval \
+  --run_dir runs/baseline \
+  --run_id baseline-v1 \
+  --sequential
+
+# 3) 失败归因
+PYTHONPATH=. python -m src.evaluation.analyze --run_dir runs/baseline
 ```
 
-### 4.2 强制重跑已有 instance
-
-若 predictions 中已有该题记录，需加 `--rerun_instance_ids`：
+### 4.2 单题 smoke
 
 ```bash
-python -m src.evaluation.run_swebench \
-  --output_dir ./predictions \
+PYTHONPATH=. python -m src.evaluation.run_swebench \
+  --output_dir runs/smoke \
   --repos_root ./eval_repos \
   --model_name my-agent \
-  --instance_ids sympy__sympy-20590 \
+  --dataset princeton-nlp/SWE-bench_Verified \
+  --instance_ids pallets__flask-5014 \
+  --max_rounds 30 \
+  --max_patch_attempts 1
+```
+
+### 4.3 强制重跑已有 instance
+
+predictions 里已有记录时会被跳过；加 `--rerun_instance_ids` 会先删掉对应行再跑：
+
+```bash
+PYTHONPATH=. python -m src.evaluation.run_swebench \
+  --output_dir runs/baseline \
+  --suite eval_suites/suite_v1.json \
+  --repos_root ./eval_repos \
+  --model_name my-agent \
+  --instance_ids sympy__sympy-17630 \
   --rerun_instance_ids \
   --max_rounds 30 \
-  --max_patch_attempts 3
+  --max_patch_attempts 1
 ```
 
-### 4.3 全量 SWE-bench Lite（300 题，可分片）
+### 4.4 仅重建汇总（不跑 Docker）
 
 ```bash
-python -m src.evaluation.run_swebench \
-  --output_dir ./predictions \
-  --repos_root ./eval_repos \
-  --model_name my-agent \
-  --shard_id 0 --num_shards 4
+PYTHONPATH=. python -m src.evaluation.run_eval \
+  --run_dir runs/baseline --run_id baseline-v1 --skip_harness
 ```
 
-### 4.4 官方 harness 评测
-
-```bash
-cd /path/to/SWE-bench
-
-python -m swebench.harness.run_evaluation \
-  --dataset_name princeton-nlp/SWE-bench_Lite \
-  --split test \
-  --predictions_path /path/to/Agent/predictions/my-agent__SWE-bench_Lite__test.jsonl \
-  --max_workers 4 \
-  --run_id my-agent-v1
-```
-
-评测报告示例字段：
-
-- `resolved_instances`：测试全部通过的数量
-- `unresolved_instances`：patch 已应用但测试未通过
-- `empty_patch_instances`：空 patch（本方案默认不写入）
-
-### 4.5 常用 CLI 参数
+### 4.5 常用 CLI 参数（`run_swebench`）
 
 | 参数 | 说明 | 默认 |
 |------|------|------|
-| `--dataset` | HuggingFace 数据集名 | `princeton-nlp/SWE-bench_Lite` |
-| `--output_dir` | predictions 输出目录 | 必填 |
-| `--repos_root` | repo 克隆目录 | `eval_repos` |
+| `--suite` | 冻结样本 JSON；会覆盖 dataset/split/instance 列表 | 无 |
+| `--dataset` | HuggingFace 数据集 | `princeton-nlp/SWE-bench_Lite`（有 suite 时以 suite 为准） |
+| `--output_dir` | 运行目录（predictions + logs + run_meta） | 必填 |
+| `--repos_root` | repo 克隆根目录 | `eval_repos` |
 | `--model_name` | 写入 `model_name_or_path` | `my-agent` |
-| `--max_rounds` | 每题最大 agent 轮数 | `30` |
-| `--max_patch_attempts` | 空 patch / 门禁失败时重试次数 | `2` |
-| `--instance_ids` | 只跑指定题目 | 全部 |
-| `--shard_id` / `--num_shards` | 分片并行 | 无 |
-| `--subagent` | 启用 subagent | 默认关闭 |
-| `--disable_patch_gate` | 关闭 patch 质量门禁 | 默认开启 |
-| `--rerun_instance_ids` | 强制重跑 `--instance_ids` 中的题 | 默认关闭 |
+| `--max_rounds` | 每题最大轮数 | `30` |
+| `--max_patch_attempts` | 空 patch / 门禁失败重试 | `2` |
+| `--instance_ids` | 只跑指定题 | 全部 / suite 内全部 |
+| `--shard_id` / `--num_shards` | 分片 | 无 |
+| `--subagent` | 启用 subagent | 关 |
+| `--disable_patch_gate` | 关闭 patch 门禁 | 门禁默认开 |
+| `--rerun_instance_ids` | 强制重跑 `--instance_ids` | 关 |
+
+`run_eval` 额外参数：`--sequential`、`--keep_images`、`--no_prepull`、`--skip_harness`。
 
 ---
 
@@ -189,89 +193,81 @@ python -m swebench.harness.run_evaluation \
 
 ### 5.1 动态工作区
 
-每个 instance 将 `WORKDIR` 切换到对应 repo 目录（`eval_repos/{owner}__{repo}`），`bash` / `read_file` / `edit_file` 均在该目录下执行。
+每题把 `WORKDIR` 切到 `eval_repos/{owner}__{repo}`；`bash` / `read_file` / `edit_file`
+都在该目录执行。每次 attempt 前 `reset_repo`（`checkout --force` + `clean -fdxq`）。
 
-### 5.2 SWE 专用 runtime（`mode=swe`）
+### 5.2 SWE runtime（`mode=swe`）
 
-评测时自动：
-
-- 关闭 skills、subagent（除非 `--subagent`）
-- 隐藏 `todo`、`write_file`、`task`、`load_skill`，减少无效探索
-- 保留 `bash`、`read_file`、`edit_file`
+- 关闭 skills；subagent 默认关（除非 `--subagent`）
+- 隐藏 `todo` / `write_file` / `task` / `load_skill`
+- 保留 `bash` / `read_file` / `edit_file`
+- **bash 隔离**：拒绝 `pip/conda/poetry install`、`setup.py develop`、`sudo` 等；
+  `HOME`/`TMPDIR` 指到临时目录，避免污染宿主 site-packages（见 `bash_policy.py`）
 
 ### 5.3 SweBenchLoop
 
-- 追踪是否调用过 `edit_file`
-- 临近轮数上限时注入提醒，要求必须编辑源码
-- 每次 attempt 从 `base_commit` 重置 repo，保证可复现
+- 只有 **成功** 的 `edit_file` 才记 `has_edited`
+- 距轮数上限 8 轮仍未成功编辑时注入强制改源码提醒
 
-### 5.4 Patch 质量门禁（默认开启）
+### 5.4 Patch 门禁（数据集无关）
 
-写入 predictions 前检查：
+写入 predictions 前：
 
-- patch 非空
-- 至少有一行新增（`+`）
+- 非空
+- 至少有新增行
 - 不能只改测试文件
-- 对 `__dict__` + `__slots__` 类 issue：若删除的 `__slots__` 多于新增，则拒绝（避免方向性错误 patch）
 
-### 5.5 日志
+不再使用任何「某一题专用」启发式（曾有的 sympy `__slots__` 规则已删除）。
 
-每题日志目录：`predictions/logs/{instance_id}/attempt_{n}/events.jsonl`
+### 5.5 日志与结果
+
+```
+runs/<run>/
+├── run_meta.json
+├── my-agent__SWE-bench_Verified__test.jsonl
+├── logs/<instance_id>/
+│   ├── result.json                 # 每题结局（含失败）
+│   └── attempt_N/events.jsonl
+├── summary.json                    # run_eval 产出
+├── analysis.json                   # analyze 产出
+└── harness/                        # 官方 harness 工作目录
+```
 
 ---
 
-## 6. 遇到的问题与当前解法
+## 6. 常见问题
 
 ### 6.1 Git clone 失败
 
-**现象**：`https://git@github.com/...` 认证失败，或 `Empty reply from server`。
+浅克隆 + 按 commit fetch；镜像源 / 原始源双 fallback；支持 `.env` 代理；
+失败清理半成品目录，合法 repo 可复用。
 
-**原因**：未配置 `GITHUB_TOKEN` 时 URL 拼错；大仓库 + 网络不稳定。
+### 6.2 空 patch
 
-**解法**：
+强化 prompt + 编辑追踪/提醒；空 patch 不进 predictions，靠
+`--max_patch_attempts` 重试；结局记在 `result.json`。
 
-- 无 token 时使用公开 URL `https://github.com/swe-bench-repos/...`
-- 浅克隆（`--filter=blob:none`）+ 按 commit fetch
-- 自动重试 + 双源 fallback（镜像仓库 / 原始仓库）
-- 支持 `https_proxy` / `http_proxy`（shell 或 `.env`）
-- 失败时清理不完整目录；已有合法 repo 则复用
+### 6.3 arm64 上 harness 报 no matching manifest
 
-### 6.2 产出空 patch
+不要改官方 SWE-bench 仓库。用本仓库 `run_eval`（自动
+`docker pull --platform linux/amd64`），或手动预拉后再跑 harness。
 
-**现象**：agent 跑满轮数但 `model_patch` 为空。
+### 6.4 Docker 镜像把磁盘打满
 
-**原因**：
+每张 instance 镜像约 4–11 GB。使用 `--sequential`（默认打完即删）。
+已打过分的镜像可：
 
-- agent 只探索、写测试脚本，未 `edit_file` 改 tracked 源码
-- `git diff` 不包含未跟踪文件
+```bash
+docker images 'swebench/sweb.eval.x86_64.*' -q | xargs -r docker rmi -f
+```
 
-**解法**：
+### 6.5 重跑被跳过
 
-- 强化 prompt：禁止建独立测试脚本，必须改已有源码
-- `SweBenchLoop` 编辑追踪 + 临近上限强制提醒
-- 空 patch 不写入 predictions，支持 `--max_patch_attempts` 重试
-- `read_file` 支持 `offset`，避免 agent 反复读文件开头浪费轮数
+加 `--rerun_instance_ids`。
 
-### 6.3 Patch 方向错误（resolved=0）
+### 6.6 退出时 ResourceTracker 警告
 
-**现象**：有 patch、harness 能跑，但 `resolved_instances=0`（如 sympy-20590 删除 `__slots__` 而非在 mixin 中补充）。
-
-**解法**：
-
-- patch 门禁：对 `__slots__` 类 issue 拒绝“删多于增”的 patch
-- prompt 中提示检查 `sympy/core/_print_helpers.py` 等 mixin
-
-### 6.4 重跑被跳过
-
-**现象**：`Skipping N completed instances`，未真正重跑。
-
-**解法**：使用 `--rerun_instance_ids`，先从 predictions 中删除对应记录再跑。
-
-### 6.5 退出时 ResourceTracker 警告
-
-**现象**：`AttributeError: '_thread.RLock' object has no attribute '_recursion_count'`。
-
-**说明**：Python 3.12 + `multiprocess` / `datasets` 的已知退出噪音，一般不影响 predictions 与评测结果。
+Python 3.12 + `datasets`/`multiprocess` 的退出噪音，一般不影响产物。
 
 ---
 
@@ -279,31 +275,23 @@ python -m swebench.harness.run_evaluation \
 
 ```
 Agent/
-├── eval_repos/                    # 克隆的 SWE-bench 镜像仓库（可复用）
-│   └── sympy__sympy/
-├── predictions/
-│   ├── my-agent__SWE-bench_Lite__test.jsonl
-│   └── logs/
-│       └── sympy__sympy-20590/
-│           ├── attempt_1/events.jsonl
-│           └── attempt_2/events.jsonl
-└── src/evaluation/                # 评测模块源码
+├── eval_suites/suite_v1.json       # 冻结的 24 题样本（进 git）
+├── eval_repos/                     # 克隆的仓库（gitignore）
+├── runs/                           # 每次运行产物（gitignore）
+│   └── baseline/
+│       ├── my-agent__SWE-bench_Verified__test.jsonl
+│       ├── logs/ …
+│       ├── summary.json
+│       └── harness/
+└── src/evaluation/
 ```
 
 ---
 
-## 8. 后续可优化方向
+## 8. 快速检查清单
 
-- 在 instance 容器内运行 agent（与 SWE-agent 一致，环境更贴近评测）
-- 提交前本地跑 SWE-bench 提供的 FAIL_TO_PASS 测试子集
-- 按 repo 缓存依赖安装，减少重复 clone 时间
-- 更强 patch 门禁（关键词 → 期望修改文件启发式）
-
----
-
-## 9. 快速检查清单
-
-- [ ] `.env` 中 API 与代理已配置
-- [ ] 单题 smoke test 产出非空 `model_patch`
-- [ ] `predictions/*.jsonl` 每行含 `instance_id`、`model_name_or_path`、`model_patch`
-- [ ] 在 SWE-bench 目录执行 `run_evaluation`，查看 `resolved_instances`
+- [ ] `.env` 中 API（与可选代理）已配置
+- [ ] Docker Desktop 运行中；磁盘留足单题镜像空间（建议 ≥15 GB 空闲）
+- [ ] `run_swebench --suite eval_suites/suite_v1.json` 产出非空 predictions
+- [ ] `run_eval --sequential` 写出 `summary.json`，`resolved` / `outcomes` 合理
+- [ ] `analyze` 写出 `analysis.json`；失败桶与优化方向对应
